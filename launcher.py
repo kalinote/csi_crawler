@@ -1,166 +1,244 @@
 import sys
 import os
-import asyncio
-import logging
 
-# 1. 引入 Scrapy 核心组件
-from scrapy.crawler import CrawlerRunner
+# 将项目根目录加入 python 搜索路径并设置 settings 模块
+root_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, root_dir)
+os.environ.setdefault('SCRAPY_SETTINGS_MODULE', 'csi_crawlers.settings')
+
+from csi_base_component_sdk import BaseComponent
+from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
-from scrapy.utils.log import configure_logging
 from scrapy import signals
-from twisted.internet import reactor, defer
+import logging
+from typing import Dict, List, Any, Optional
 
-# 2. 引入你的 SDK 和 爬虫类
-from csi_base_components_sdk.node import AsyncFlowNode
-from csi_crawlers.spiders.javbus import JavbusSpider
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] [%(levelname)s] [LAUNCHER] %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger("LAUNCHER")
 
-# 建立映射
-SPIDER_MAP = {
-    'javbus': JavbusSpider,
-}
 
-# ==========================================
-# 核心组件：监控器 (Sidecar Monitor)
-# 它负责在爬虫运行时“偷听”爬虫的状态
-# ==========================================
 class SpiderMonitor:
-    def __init__(self):
-        self.stats = {
-            "item_count": 0,
-            "error_count": 0,
-            "finished_spiders": 0
-        }
-
-    def on_item_scraped(self, item, response, spider):
-        """每当爬虫采集到一个 Item，这个函数就会被调用"""
-        self.stats["item_count"] += 1
-        # 你可以在这里做简单的打印，调度平台会收集到 stdout
-        # print(f"[{spider.name}] 采集到数据: {str(item)[:50]}...") 
-
-    def on_spider_error(self, failure, response, spider):
-        """爬虫报错时调用"""
-        self.stats["error_count"] += 1
-        print(f"!! [{spider.name}] 发生错误: {failure}")
-
+    def __init__(self, total_spiders: int, sdk_node: BaseComponent):
+        self.total_spiders = total_spiders
+        self.sdk_node = sdk_node
+        self.spider_progress = {}
+        self.spider_errors = {}
+        self.spider_success = {}
+        self.item_counts = {}
+        self.base_progress = 0
+        
+    def on_spider_opened(self, spider):
+        spider_name = spider.name
+        self.spider_progress[spider_name] = 10
+        logger.info(f"爬虫 {spider_name} 已启动")
+        self._update_overall_progress(f"爬虫 {spider_name} 已启动")
+    
     def on_spider_closed(self, spider, reason):
-        """单个爬虫结束时调用"""
-        self.stats["finished_spiders"] += 1
-        print(f"[{spider.name}] 任务结束，原因: {reason}")
-
-
-# ==========================================
-# 核心逻辑：Scrapy 启动器 (Twisted 环境)
-# ==========================================
-def run_scrapy_engine(inputs, config, monitor):
-    """
-    这里运行的是 Twisted 事件循环
-    """
-    # 1. 获取基础配置
-    settings = get_project_settings()
+        spider_name = spider.name
+        if reason == 'finished':
+            self.spider_progress[spider_name] = 100
+            self.spider_success[spider_name] = True
+            logger.info(f"爬虫 {spider_name} 已完成，原因: {reason}")
+        else:
+            self.spider_errors[spider_name] = f"关闭原因: {reason}"
+            self.spider_success[spider_name] = False
+            logger.warning(f"爬虫 {spider_name} 异常关闭，原因: {reason}")
+        
+        self._update_overall_progress(f"爬虫 {spider_name} 已结束")
     
-    # 【高阶技巧】在这里动态修改 Settings
-    # 比如：根据后端传来的配置，动态设置 Pipelines 输出的队列名
-    output_queue = config.get("output_queue", "default_queue")
-    # 我们利用环境变量传给 Pipeline (这是最不侵入代码的方式)
-    os.environ["TARGET_RABBITMQ_QUEUE"] = output_queue
+    def on_item_scraped(self, item, spider):
+        spider_name = spider.name
+        self.item_counts[spider_name] = self.item_counts.get(spider_name, 0) + 1
+        
+        if self.item_counts[spider_name] % 10 == 0:
+            current = min(90, 10 + (self.item_counts[spider_name] // 10) * 5)
+            self.spider_progress[spider_name] = current
+            self._update_overall_progress(f"爬虫 {spider_name} 已采集 {self.item_counts[spider_name]} 条数据")
     
-    # 或者直接覆盖设置 (如果 Pipeline 读取的是 settings)
-    # settings.set('MY_QUEUE_NAME', output_queue)
+    def on_spider_error(self, failure, spider):
+        spider_name = spider.name
+        error_msg = str(failure.value)
+        self.spider_errors[spider_name] = error_msg
+        logger.error(f"爬虫 {spider_name} 发生错误: {error_msg}")
+    
+    def _update_overall_progress(self, message: str):
+        if not self.spider_progress:
+            return
+        
+        avg_progress = sum(self.spider_progress.values()) / self.total_spiders
+        self.sdk_node.report_progress(int(avg_progress), message)
+    
+    def record_startup_error(self, spider_name: str, error: str):
+        self.spider_errors[spider_name] = error
+        self.spider_success[spider_name] = False
+        logger.error(f"爬虫 {spider_name} 启动失败: {error}")
+    
+    def has_success(self) -> bool:
+        return any(self.spider_success.values())
+    
+    def get_summary(self) -> Dict[str, Any]:
+        success_spiders = [name for name, success in self.spider_success.items() if success]
+        failed_spiders = [
+            {"name": name, "error": self.spider_errors.get(name, "未知错误")}
+            for name, success in self.spider_success.items() if not success
+        ]
+        
+        total_items = sum(self.item_counts.values())
+        
+        return {
+            "status": "success",
+            "total_spiders": self.total_spiders,
+            "success_spiders": success_spiders,
+            "failed_spiders": failed_spiders,
+            "total_items_scraped": total_items,
+            "item_counts": self.item_counts
+        }
+    
+    def get_error_message(self) -> str:
+        errors = [f"{name}: {error}" for name, error in self.spider_errors.items()]
+        return "所有爬虫都失败了。错误信息: " + "; ".join(errors)
 
-    configure_logging(settings)
-    runner = CrawlerRunner(settings)
 
-    # 2. 解析目标平台
-    # 假设 inputs = { "platforms": { "content": ["bilibili"] }, "keyword": { "content": "AI" } }
-    platforms = inputs.get('platforms', {}).get('content', [])
-    keyword = inputs.get('keyword', {}).get('content', '')
-
-    if isinstance(platforms, str): platforms = [platforms]
-
-    crawlers = []
-    for p_name in platforms:
-        spider_cls = SPIDER_MAP.get(p_name)
-        if not spider_cls:
-            continue
-            
-        # 3. 创建 Crawler 实例但不立即启动
-        crawler = runner.create_crawler(spider_cls)
-
-        # 4. 【关键】挂载监控钩子 (Hook Signals)
-        # 将 monitor 的方法绑定到 Scrapy 的信号上
-        crawler.signals.connect(monitor.on_item_scraped, signal=signals.item_scraped)
-        crawler.signals.connect(monitor.on_spider_error, signal=signals.spider_error)
-        crawler.signals.connect(monitor.on_spider_closed, signal=signals.spider_closed)
-
-        # 5. 【关键】启动爬虫并注入参数
-        # 这里的 kwargs (keyword=...) 会被 Scrapy 自动变成 spider.keyword
-        # 爬虫代码里直接用 self.keyword 就能拿到，不需要写 __init__
-        d = runner.crawl(crawler, keyword=keyword, extra_config=config)
-        crawlers.append(d)
-
-    # 6. 等待所有爬虫结束
-    if crawlers:
-        d_list = defer.DeferredList(crawlers)
-        d_list.addBoth(lambda _: reactor.stop())
-        reactor.run() # 阻塞执行
+def extract_platforms(inputs: Dict[str, Any]) -> List[str]:
+    platforms_data = inputs.get('platforms')
+    
+    if not platforms_data:
+        logger.warning("配置中未找到 platforms 参数，将尝试从其他字段中查找")
+        for key, value in inputs.items():
+            if isinstance(value, dict) and value.get('type') == 'value':
+                val = value.get('value')
+                if isinstance(val, list) and all(isinstance(v, str) for v in val):
+                    logger.info(f"从 {key} 字段中提取到平台列表: {val}")
+                    return val
+        return []
+    
+    if isinstance(platforms_data, dict) and platforms_data.get('type') == 'value':
+        platforms = platforms_data.get('value', [])
+    elif isinstance(platforms_data, list):
+        platforms = platforms_data
     else:
-        print("没有可执行的爬虫任务")
+        platforms = [str(platforms_data)]
+    
+    if not platforms:
+        logger.error("未能提取到有效的平台列表")
+    
+    return platforms
 
 
-# ==========================================
-# 主入口：Asyncio 环境
-# ==========================================
-if __name__ == "__main__":
-    # 阶段 1: 异步拉取配置 (SDK)
-    # -----------------------------------
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+def parse_spider_args(config: Dict[str, Any], inputs: Dict[str, Any], outputs: Dict[str, Any]) -> Dict[str, str]:
+    args = {}
     
-    sdk_node = AsyncFlowNode()
-    # 手动运行初始化
-    loop.run_until_complete(sdk_node.initialize())
+    for key, value in config.items():
+        if isinstance(value, list):
+            args[key] = ','.join(str(v) for v in value)
+        else:
+            args[key] = str(value)
     
-    inputs = sdk_node.inputs
-    config = sdk_node.config
+    for key, input_data in inputs.items():
+        if key == 'platforms':
+            continue
+        
+        if isinstance(input_data, dict) and input_data.get('type') == 'value':
+            value = input_data.get('value')
+            if isinstance(value, list):
+                args[key] = ','.join(str(v) for v in value)
+            else:
+                args[key] = str(value)
     
-    print(f">>> 任务启动，配置已拉取: {inputs}")
+    for key, output_list in outputs.items():
+        queues = []
+        if isinstance(output_list, list):
+            for output in output_list:
+                if isinstance(output, dict) and output.get('type') == 'reference':
+                    value = output.get('value', [])
+                    if isinstance(value, list):
+                        queues.extend(value)
+                    else:
+                        queues.append(str(value))
+        
+        if queues:
+            args['rabbitmq_queue'] = ','.join(queues)
+    
+    return args
 
-    # 阶段 2: 运行 Scrapy (阻塞)
-    # -----------------------------------
-    # 创建监控器实例
-    monitor = SpiderMonitor()
-    
-    # 启动 Twisted Reactor (这行代码会一直运行直到爬虫结束)
-    run_scrapy_engine(inputs, config, monitor)
-    
-    print(">>> 所有爬虫任务已结束")
-    print(f">>> 统计数据: {monitor.stats}")
 
-    # 阶段 3: 异步上报结果 (SDK)
-    # -----------------------------------
-    async def report_result():
-        # 重新建立 session (因为之前的 loop 可能干扰)
-        # 也可以在 SDK 内部优化这个逻辑
-        async with AsyncFlowNode(action_node_id=sdk_node.action_node_id, api_base_url=sdk_node.api_base_url) as node:
-            # 构造最终输出
-            # 假设所有数据都进了一个 MQ，我们返回 MQ 的地址
-            queue_uri = f"amqp://guest:guest@localhost/{os.environ.get('TARGET_RABBITMQ_QUEUE')}"
-            
-            # 根据监控统计判断状态
-            final_status = "success"
-            if monitor.stats["error_count"] > 0:
-                final_status = "warning" # 或者 failed
-            
-            await node.finish(outputs={
-                "data_queue": {
-                    "type": "reference",
-                    "uri": queue_uri
-                },
-                "job_stats": {
-                    "type": "value",
-                    "content": monitor.stats
-                }
-            })
+def main():
+    with BaseComponent() as node:
+        logger.info("启动 Scrapy 爬虫调度器")
+        
+        config = node.config
+        inputs = node.inputs
+        outputs = node.outputs
+        
+        logger.info(f"接收到配置: config={config}")
+        logger.info(f"接收到输入: inputs={inputs}")
+        logger.info(f"接收到输出: outputs={outputs}")
+        
+        platforms = extract_platforms(inputs)
+        if not platforms:
+            node.fail("未能从配置中提取到有效的平台列表(platforms)")
+            return
+        
+        logger.info(f"将要运行的爬虫: {platforms}")
+        
+        spider_args = parse_spider_args(config, inputs, outputs)
+        logger.info(f"解析的爬虫参数: {spider_args}")
+        
+        monitor = SpiderMonitor(len(platforms), node)
+        
+        settings = get_project_settings()
+        process = CrawlerProcess(settings)
+        
+        for spider_name in platforms:
+            try:
+                crawler = process.create_crawler(spider_name)
+                
+                crawler.signals.connect(monitor.on_spider_opened, signal=signals.spider_opened)
+                crawler.signals.connect(monitor.on_spider_closed, signal=signals.spider_closed)
+                crawler.signals.connect(monitor.on_item_scraped, signal=signals.item_scraped)
+                crawler.signals.connect(monitor.on_spider_error, signal=signals.spider_error)
+                
+                process.crawl(crawler, **spider_args)
+                
+                logger.info(f"爬虫 {spider_name} 已加入执行队列")
+            except KeyError as e:
+                error_msg = f"爬虫不存在: {spider_name}"
+                monitor.record_startup_error(spider_name, error_msg)
+                logger.error(error_msg)
+            except Exception as e:
+                error_msg = f"启动失败: {str(e)}"
+                monitor.record_startup_error(spider_name, error_msg)
+                logger.error(f"爬虫 {spider_name} 启动异常: {error_msg}")
+        
+        if not process.crawlers:
+            node.fail("所有爬虫都启动失败")
+            return
+        
+        logger.info("开始执行爬虫...")
+        node.report_progress(5, "爬虫开始执行")
+        
+        try:
+            process.start()
+        except Exception as e:
+            logger.error(f"爬虫执行过程中发生异常: {e}")
+            node.fail(f"爬虫执行异常: {str(e)}")
+            return
+        
+        logger.info("所有爬虫执行完毕，开始汇总结果")
+        
+        if monitor.has_success():
+            summary = monitor.get_summary()
+            logger.info(f"执行成功: {summary}")
+            node.finish(summary)
+        else:
+            error_msg = monitor.get_error_message()
+            logger.error(f"执行失败: {error_msg}")
+            node.fail(error_msg)
 
-    loop.run_until_complete(report_result())
-    loop.close()
+
+if __name__ == '__main__':
+    main()

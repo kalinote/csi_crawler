@@ -47,9 +47,14 @@ class RabbitMQPipeline:
     def open_spider(self, spider):
         custom_queue = getattr(spider, 'rabbitmq_queue', None)
         if custom_queue:
-            self.rabbitmq_queue = custom_queue
-            self.rabbitmq_routing_key = custom_queue
-            spider.logger.info(f'Pipeline 使用自定义 RabbitMQ 队列: {custom_queue}')
+            if ',' in custom_queue:
+                self.rabbitmq_queues = [q.strip() for q in custom_queue.split(',') if q.strip()]
+                spider.logger.info(f'Pipeline 使用自定义 RabbitMQ 队列(多个): {self.rabbitmq_queues}')
+            else:
+                self.rabbitmq_queues = [custom_queue]
+                spider.logger.info(f'Pipeline 使用自定义 RabbitMQ 队列: {custom_queue}')
+        else:
+            self.rabbitmq_queues = [self.rabbitmq_queue]
         
         credentials = pika.PlainCredentials(self.rabbitmq_user, self.rabbitmq_password)
         parameters = pika.ConnectionParameters(
@@ -61,20 +66,21 @@ class RabbitMQPipeline:
         self.connection = pika.BlockingConnection(parameters)
         self.channel = self.connection.channel()
         
-        if self.rabbitmq_exchange:
-            self.channel.exchange_declare(
-                exchange=self.rabbitmq_exchange,
-                exchange_type='direct',
-                durable=True
-            )
-            self.channel.queue_declare(queue=self.rabbitmq_queue, durable=True)
-            self.channel.queue_bind(
-                exchange=self.rabbitmq_exchange,
-                queue=self.rabbitmq_queue,
-                routing_key=self.rabbitmq_routing_key
-            )
-        else:
-            self.channel.queue_declare(queue=self.rabbitmq_queue, durable=True)
+        for queue in self.rabbitmq_queues:
+            if self.rabbitmq_exchange:
+                self.channel.exchange_declare(
+                    exchange=self.rabbitmq_exchange,
+                    exchange_type='direct',
+                    durable=True
+                )
+                self.channel.queue_declare(queue=queue, durable=True)
+                self.channel.queue_bind(
+                    exchange=self.rabbitmq_exchange,
+                    queue=queue,
+                    routing_key=queue
+                )
+            else:
+                self.channel.queue_declare(queue=queue, durable=True)
 
     def close_spider(self, spider):
         if self.connection and not self.connection.is_closed:
@@ -87,24 +93,25 @@ class RabbitMQPipeline:
         message = json.dumps(item_dict, ensure_ascii=False, cls=self.encoder.__class__)
         
         try:
-            if self.rabbitmq_exchange:
-                self.channel.basic_publish(
-                    exchange=self.rabbitmq_exchange,
-                    routing_key=self.rabbitmq_routing_key,
-                    body=message,
-                    properties=pika.BasicProperties(
-                        delivery_mode=2,
+            for queue in self.rabbitmq_queues:
+                if self.rabbitmq_exchange:
+                    self.channel.basic_publish(
+                        exchange=self.rabbitmq_exchange,
+                        routing_key=queue,
+                        body=message,
+                        properties=pika.BasicProperties(
+                            delivery_mode=2,
+                        )
                     )
-                )
-            else:
-                self.channel.basic_publish(
-                    exchange='',
-                    routing_key=self.rabbitmq_queue,
-                    body=message,
-                    properties=pika.BasicProperties(
-                        delivery_mode=2,
+                else:
+                    self.channel.basic_publish(
+                        exchange='',
+                        routing_key=queue,
+                        body=message,
+                        properties=pika.BasicProperties(
+                            delivery_mode=2,
+                        )
                     )
-                )
         except Exception as e:
             spider.logger.error(f'发送消息到 RabbitMQ 失败: {e}')
             raise

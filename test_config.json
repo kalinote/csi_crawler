@@ -1,0 +1,28 @@
+{
+    "meta": {
+        "node_id": "test_node_001",
+        "action_id": "694251b96d9534925bd9f6f3"
+    },
+    "config": {
+        "page": 2,
+        "crawler_type": "keyword"
+    },
+    "inputs": {
+        "keywords": {
+            "type": "value",
+            "value": ["黑丝"]
+        },
+        "platforms": {
+            "type": "value",
+            "value": ["javbus"]
+        }
+    },
+    "outputs": {
+        "data_out": [
+            {
+                "type": "reference",
+                "value": ["tmp_queue_1", "tmp_queue_2"]
+            }
+        ]
+    }
+}
