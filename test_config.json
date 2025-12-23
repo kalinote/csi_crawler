@@ -18,11 +18,9 @@
         }
     },
     "outputs": {
-        "data_out": [
-            {
-                "type": "reference",
-                "value": ["tmp_queue_1", "tmp_queue_2"]
-            }
-        ]
+        "data_out": {
+            "type": "reference",
+            "value": ["tmp_queue_1", "tmp_queue_2"]
+        }
     }
 }

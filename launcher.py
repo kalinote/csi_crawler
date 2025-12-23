@@ -148,17 +148,15 @@ def parse_spider_args(config: Dict[str, Any], inputs: Dict[str, Any], outputs: D
                 args[key] = ','.join(str(v) for v in value)
             else:
                 args[key] = str(value)
-    
-    for key, output_list in outputs.items():
+        
+    for key, output in outputs.items():
         queues = []
-        if isinstance(output_list, list):
-            for output in output_list:
-                if isinstance(output, dict) and output.get('type') == 'reference':
-                    value = output.get('value', [])
-                    if isinstance(value, list):
-                        queues.extend(value)
-                    else:
-                        queues.append(str(value))
+        if isinstance(output, dict) and output.get('type') == 'reference':
+            value = output.get('value', [])
+            if isinstance(value, list):
+                queues.extend(value)
+            else:
+                queues.append(str(value))
         
         if queues:
             args['rabbitmq_queue'] = ','.join(queues)
