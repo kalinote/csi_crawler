@@ -90,7 +90,6 @@ class SpiderMonitor:
         total_items = sum(self.item_counts.values())
         
         return {
-            "status": "success",
             "total_spiders": self.total_spiders,
             "success_spiders": success_spiders,
             "failed_spiders": failed_spiders,
