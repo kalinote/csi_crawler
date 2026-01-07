@@ -1,6 +1,7 @@
 import re
 from datetime import datetime
 import hashlib
+from urllib.parse import urlparse, parse_qs
 
 def find_datetime_from_str(text: str) -> str:
     """
@@ -79,3 +80,19 @@ def generate_uuid(str_data: str) -> str:
     生成一个唯一的UUID
     """
     return hashlib.md5(str_data.encode()).hexdigest()
+
+def extract_param_from_url(url: str, param_name: str) -> str:
+    """
+    从URL中提取指定参数的值，支持相对链接和完整链接
+    """
+    if not url:
+        return None
+    
+    if not url.startswith('http'):
+        url = 'http://example.com/' + url
+    
+    parsed_url = urlparse(url)
+    query_params = parse_qs(parsed_url.query)
+    
+    param_value = query_params.get(param_name, [None])[0]
+    return param_value.strip() if param_value else None

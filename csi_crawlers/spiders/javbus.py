@@ -3,12 +3,11 @@ import scrapy
 from scrapy.http import HtmlResponse
 from urllib.parse import urlparse, parse_qs
 from csi_crawlers.items import CSIForumItem
-from csi_crawlers.utils import find_datetime_from_str, find_int_from_str, generate_uuid, get_flag_name_from_url, safe_int
+from csi_crawlers.utils import find_datetime_from_str, find_int_from_str, generate_uuid, get_flag_name_from_url, safe_int, extract_param_from_url
 from csi_crawlers.spiders.base import BaseSpider
 
 # TODO: 按照发帖时间搜索
 # TODO: 采集站点主页信息
-# TODO: 采集站点评论信息
 # TODO: 采集站点用户信息
 
 class JavbusSpider(BaseSpider):
@@ -167,123 +166,197 @@ class JavbusSpider(BaseSpider):
         else:
             self.logger.info(f"已到达最后一页，当前第 {current_page} 页")
     
-    def parse_thread(self, response: HtmlResponse):
-        forum_item = CSIForumItem()
+    def _init_base_item(self, response, tid, section):
+        """辅助方法：初始化基础 Item 并填充通用字段"""
+        item = CSIForumItem()
+        item["topic_id"] = tid
+        item["url"] = response.url
+        item["platform"] = self.name
+        item["spider_name"] = "csi_crawlers-javbus"
+        item["section"] = section
+        item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item["nsfw"] = True
+        item["aigc"] = False
         
+        # 设置默认值为 -1 的字段
+        for field in ["likes", "dislikes", "collections", "comments", "views"]:
+            item[field] = -1
+            
+        return item
+
+    def _parse_featured_comments(self, comment_containers, parent_source_id, parent_last_edit_at, common_data):
+        """辅助方法：解析楼中楼/点评 (消除重复逻辑)"""
+        # 解包通用数据
+        response = common_data['response']
+        tid = common_data['tid']
+        section = common_data['section']
+        category_tag = common_data['category_tag']
+        title = common_data['title']
+
+        for comment_container in comment_containers:
+            comment_id_attr = comment_container.xpath("./@id").get()
+            if not comment_id_attr:
+                continue
+            
+            source_id = comment_id_attr.split("comment_")[-1].strip()
+            featured_posts = comment_container.xpath("./div")
+            
+            # 使用 enumerate 自动计算楼层
+            for inner_floor, featured_post in enumerate(featured_posts, 1):
+                raw_content = featured_post.xpath("./div[@class='psti']/text()").get() or ""
+                author_href = featured_post.xpath(".//div/a/@href").get()
+                author_id = extract_param_from_url(author_href, "uid")
+                
+                author_name_elem = featured_post.xpath("(.//div/a/text())[last()]").get()
+                author_name = author_name_elem.strip() if author_name_elem else None
+                
+                if not raw_content or not author_id or not author_name:
+                    continue
+                
+                # 使用辅助函数初始化
+                item = self._init_base_item(response, tid, section)
+                
+                # 填充特定字段
+                item["uuid"] = generate_uuid(source_id + str(parent_last_edit_at) + raw_content)
+                item["source_id"] = source_id
+                item["publish_at"] = find_datetime_from_str(featured_post.xpath('.//div[@class="psti"]/span/text()').get())
+                item["last_edit_at"] = item["publish_at"] # 点评通常没有编辑时间，视作同发布时间
+                item["author_id"] = author_id
+                item["author_name"] = author_name
+                item["parent_id"] = parent_source_id
+                item["floor"] = inner_floor
+                item["thread_type"] = "featured"
+                item["category_tag"] = category_tag
+                item["title"] = title
+                item["raw_content"] = raw_content
+                item["status_flags"] = []
+                
+                yield item
+
+    def parse_thread(self, response: HtmlResponse):
         parsed_url = urlparse(response.url)
         query_params = parse_qs(parsed_url.query)
         tid = query_params.get('tid', [None])[0]
+        section = response.meta.get("section", "")
         
-        # 首先处理主帖
+        # 准备传递给子函数的通用数据包
+        common_data = {
+            'response': response,
+            'tid': tid,
+            'section': section,
+            'category_tag': "", # 后续填充
+            'title': ""         # 后续填充
+        }
+
+        # 1. 处理主帖 (First Post)
         first_post_box = response.xpath("//div[@class='nthread_postbox nthread_firstpostbox']")
         
-        author_info_box = first_post_box.xpath("//div[@class='viewthread_authorinfo']")
-        if author_info_box:
-            author_url = author_info_box.xpath(".//div[@class='authi']/a/@href").get()
-            parsed_author_url = urlparse("https://www.javbus.com/forum/" + author_url)
-            author_query_params = parse_qs(parsed_author_url.query)
-            author_id = author_query_params.get('uid', [None])[0]
-            author_name = author_info_box.xpath(".//div[@class='authi']/a/text()").get()
-        else:
-            author_id = None
-            author_name = None
-        
-        # 如果翻页则没有 first_post_box
+        # 如果不是翻页，存在 first_post_box
         if first_post_box:
+            # 提取主贴特有信息
             raw_content = first_post_box.xpath(".//div[@class='t_fsz']").get() or ""
             last_edit_at = find_datetime_from_str(first_post_box.xpath(".//i[@class='pstatus']/text()").get()) or None
-            source_id = (first_post_box.xpath('./td[@class="t_f"]/@id').get() or tid).split("postmessage_")[-1].strip()
-            category_tag = response.xpath("//div[@class='nthread_info cl']/h1/a/font/text()").get()
-            title = (response.xpath("//div[@class='nthread_info cl']/h1/span/text()").get() or "").strip()
+            source_id = (first_post_box.xpath("./@id").get() or tid).split("post_")[-1].strip()
             
-            forum_item["uuid"] = generate_uuid(source_id + str(last_edit_at) + raw_content)
-            forum_item["topic_id"] = tid
-            forum_item["source_id"] = source_id
-            forum_item["url"] = response.url
-            forum_item["platform"] = self.name
-            forum_item["section"] = response.meta["section"]
-            forum_item["spider_name"] = "csi_crawlers-javbus"
-            forum_item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            forum_item["publish_at"] = response.xpath("//span[@class='mr10']/text()").get()
-            forum_item["last_edit_at"] = last_edit_at
-            forum_item["author_id"] = author_id
-            forum_item["author_name"] = author_name
-            forum_item["nsfw"] = True
-            forum_item["aigc"] = False
-            forum_item["parent_id"] = tid
-            forum_item["floor"] = 1
-            forum_item["thread_type"] = "main"
-            forum_item["category_tag"] = category_tag
-            forum_item["title"] = title
-            forum_item["raw_content"] = raw_content
-            forum_item["status_flags"] = response.meta["status_flags"]
-            forum_item["likes"] = safe_int(response.xpath("//span[@id='recommendv_add']/text()").get()) or -1
-            forum_item["dislikes"] = -1
-            forum_item["collections"] = safe_int(response.xpath("//span[@id='favoritenumber']/text()").get()) or -1
-            forum_item["comments"] = find_int_from_str(response.xpath("//div[@class='authi mb5']/span[@class='y']/text()").get()) or -1
-            forum_item["views"] = find_int_from_str(response.xpath("//div[@class='authi mb5']/span[@class='mr10 y']/text()").get()) or -1
-                    
+            # 更新 common_data
+            common_data['category_tag'] = response.xpath("//div[@class='nthread_info cl']/h1/a/font/text()").get()
+            common_data['title'] = (response.xpath("//div[@class='nthread_info cl']/h1/span/text()").get() or "").strip()
+            
+            # 初始化并填充主贴 Item
+            forum_item = self._init_base_item(response, tid, section)
+            
+            author_info_box = first_post_box.xpath("//div[@class='viewthread_authorinfo']")
+            if author_info_box:
+                forum_item["author_id"] = extract_param_from_url(author_info_box.xpath(".//div[@class='authi']/a/@href").get(), "uid")
+                forum_item["author_name"] = author_info_box.xpath(".//div[@class='authi']/a/text()").get()
+            
+            forum_item.update({
+                "uuid": generate_uuid(source_id + str(last_edit_at) + raw_content),
+                "source_id": source_id,
+                "publish_at": response.xpath("//span[@class='mr10']/text()").get(),
+                "last_edit_at": last_edit_at,
+                "parent_id": tid,
+                "floor": 1,
+                "thread_type": "thread",
+                "category_tag": common_data['category_tag'],
+                "title": common_data['title'],
+                "raw_content": raw_content,
+                "status_flags": response.meta.get("status_flags", []),
+                "likes": safe_int(response.xpath("//span[@id='recommendv_add']/text()").get()) or -1,
+                "collections": safe_int(response.xpath("//span[@id='favoritenumber']/text()").get()) or -1,
+                "comments": find_int_from_str(response.xpath("//div[@class='authi mb5']/span[@class='y']/text()").get()) or -1,
+                "views": find_int_from_str(response.xpath("//div[@class='authi mb5']/span[@class='mr10 y']/text()").get()) or -1,
+            })
+            
             yield forum_item
             
-            # 继续处理主贴点评
-            comment_containers = first_post_box.xpath(".//div[starts-with(@id, 'comment_')]")
-            for comment_container in comment_containers:
-                comment_id_attr = comment_container.xpath("./@id").get()
-                if not comment_id_attr:
-                    continue
-                comment_source_id = comment_id_attr.split("comment_")[-1].strip()
-                
-                featured_posts = comment_container.xpath("./div")
-                inner_floor = 0
-                for featured_post in featured_posts:
-                    inner_floor += 1
-                    featured_post_item = CSIForumItem()
-                    
-                    raw_content = featured_post.xpath("./div[@class='psti']/text()").get() or ""
-                    author_href = featured_post.xpath(".//div/a/@href").get()
-                    author_id = None
-                    if author_href and "&uid=" in author_href:
-                        author_id = author_href.split("&uid=")[-1].strip()
-                    
-                    author_name_elem = featured_post.xpath("(.//div/a/text())[last()]").get()
-                    author_name = author_name_elem.strip() if author_name_elem else None
-                    
-                    if not raw_content or not author_id or not author_name:
-                        continue
-                    
-                    featured_post_item["uuid"] = generate_uuid(comment_source_id + str(last_edit_at) + raw_content)
-                    featured_post_item["topic_id"] = tid
-                    featured_post_item["source_id"] = comment_source_id
-                    featured_post_item["url"] = response.url
-                    featured_post_item["platform"] = self.name
-                    featured_post_item["section"] = response.meta["section"]
-                    featured_post_item["spider_name"] = "csi_crawlers-javbus"
-                    featured_post_item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    featured_post_item["publish_at"] = response.xpath("//span[@class='mr10']/text()").get()
-                    featured_post_item["last_edit_at"] = last_edit_at
-                    featured_post_item["author_id"] = author_id
-                    featured_post_item["author_name"] = author_name
-                    featured_post_item["nsfw"] = True
-                    featured_post_item["aigc"] = False
-                    featured_post_item["parent_id"] = source_id
-                    featured_post_item["floor"] = inner_floor
-                    featured_post_item["thread_type"] = "featured"
-                    featured_post_item["category_tag"] = category_tag
-                    featured_post_item["title"] = title
-                    featured_post_item["raw_content"] = raw_content
-                    featured_post_item["status_flags"] = []
-                    featured_post_item["likes"] = -1
-                    featured_post_item["dislikes"] = -1
-                    featured_post_item["collections"] = -1
-                    featured_post_item["comments"] = -1
-                    featured_post_item["views"] = -1
-                    
-                    yield featured_post_item
+            # 处理主贴下的点评/楼中楼 (复用逻辑)
+            yield from self._parse_featured_comments(
+                first_post_box.xpath(".//div[starts-with(@id, 'comment_')]"),
+                source_id,
+                last_edit_at,
+                common_data
+            )
+            
+        else:
+            # 翻页情况：从 meta 恢复主贴信息供后续使用
+            common_data['category_tag'] = response.meta.get("category_tag", "")
+            common_data['title'] = response.meta.get("title", "")
+            # 注意：source_id 在这里如果是翻页，通常还是指向主贴ID或者上一页传过来的ID，用于关联
+            source_id = response.meta.get("source_id", tid)
 
-        # 处理评论
+        # 2. 处理普通回复 (Comments)
         post_boxes = response.xpath("//div[@class='nthread_postbox']")
         for post_box in post_boxes:
-            pass
+            comment_source_id = (post_box.xpath("./@id").get() or tid).split("post_")[-1].strip()
+            comment_last_edit_at = find_datetime_from_str(post_box.xpath("./em[starts-with(@id, 'authorposton')]/text()").get()) or None
+            comment_raw_content = post_box.xpath('.//td[@class="t_f"]').get() or ""
+            
+            comment_item = self._init_base_item(response, tid, section)
+            
+            comment_item.update({
+                "uuid": generate_uuid(comment_source_id + str(comment_last_edit_at) + comment_raw_content),
+                "source_id": comment_source_id,
+                "publish_at": comment_last_edit_at,
+                "last_edit_at": comment_last_edit_at,
+                "author_id": extract_param_from_url(post_box.xpath('.//div[@class="authi"]/a/@href').get(), "uid"),
+                "author_name": post_box.xpath('.//div[@class="authi"]/a/text()').get() or "",
+                "parent_id": source_id or tid,
+                "floor": safe_int(post_box.xpath(".//strong/a/em/text()").get()) or -1,
+                "thread_type": "comment",
+                "category_tag": common_data['category_tag'],
+                "title": common_data['title'],
+                "raw_content": comment_raw_content,
+                "status_flags": [],
+            })
+            
+            yield comment_item
+            
+            # 处理回复下的点评/楼中楼 (复用逻辑)
+            yield from self._parse_featured_comments(
+                post_box.xpath(".//div[starts-with(@id, 'comment_')]"),
+                comment_source_id,
+                comment_last_edit_at,
+                common_data
+            )
         
-        # TODO: 翻页
+        # 处理评论翻页
+        next_page_link = response.xpath("//a[@class='nxt']/@href").get()
+        if next_page_link:
+            next_page_url = response.urljoin(next_page_link)
+            self.logger.info(f"帖子 {tid} 5秒后将爬取下一页评论")
+            
+            yield scrapy.Request(
+                url=next_page_url,
+                callback=self.parse_thread,
+                meta={
+                    "section": section,
+                    "status_flags": response.meta.get("status_flags"),
+                    "source_id": source_id,
+                    "category_tag": common_data['category_tag'],
+                    "title": common_data['title'],
+                    "download_delay": 5
+                }
+            )
+        
         

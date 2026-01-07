@@ -24,6 +24,7 @@ class CSIForumItem(scrapy.Item):
     """
     论坛item
     """
+    entity_type = scrapy.Field(default="forum")
     uuid = scrapy.Field()
     topic_id = scrapy.Field()
     source_id = scrapy.Field()
