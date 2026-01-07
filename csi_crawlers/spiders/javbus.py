@@ -3,7 +3,7 @@ import scrapy
 from scrapy.http import HtmlResponse
 from urllib.parse import urlparse, parse_qs
 from csi_crawlers.items import CSIForumItem
-from csi_crawlers.utils import find_datetime_from_str, find_int_from_str, get_flag_name_from_url, safe_int
+from csi_crawlers.utils import find_datetime_from_str, find_int_from_str, generate_uuid, get_flag_name_from_url, safe_int
 from csi_crawlers.spiders.base import BaseSpider
 
 # TODO: 按照发帖时间搜索
@@ -190,38 +190,95 @@ class JavbusSpider(BaseSpider):
         
         # 如果翻页则没有 first_post_box
         if first_post_box:
-            forum_item["source_id"] = tid
+            raw_content = first_post_box.xpath(".//div[@class='t_fsz']").get() or ""
+            last_edit_at = find_datetime_from_str(first_post_box.xpath(".//i[@class='pstatus']/text()").get()) or None
+            source_id = (first_post_box.xpath('./td[@class="t_f"]/@id').get() or tid).split("postmessage_")[-1].strip()
+            category_tag = response.xpath("//div[@class='nthread_info cl']/h1/a/font/text()").get()
+            title = (response.xpath("//div[@class='nthread_info cl']/h1/span/text()").get() or "").strip()
+            
+            forum_item["uuid"] = generate_uuid(source_id + str(last_edit_at) + raw_content)
+            forum_item["topic_id"] = tid
+            forum_item["source_id"] = source_id
             forum_item["url"] = response.url
-            forum_item["platform"] = "javbus"
+            forum_item["platform"] = self.name
             forum_item["section"] = response.meta["section"]
             forum_item["spider_name"] = "csi_crawlers-javbus"
             forum_item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             forum_item["publish_at"] = response.xpath("//span[@class='mr10']/text()").get()
-            forum_item["last_edit_at"] = find_datetime_from_str(first_post_box.xpath(".//i[@class='pstatus']/text()").get()) or None
+            forum_item["last_edit_at"] = last_edit_at
             forum_item["author_id"] = author_id
             forum_item["author_name"] = author_name
             forum_item["nsfw"] = True
             forum_item["aigc"] = False
-            forum_item["root_id"] = tid
-            forum_item["parent_id"] = None
+            forum_item["parent_id"] = tid
             forum_item["floor"] = 1
             forum_item["thread_type"] = "main"
-            forum_item["category_tag"] = response.xpath("//div[@class='nthread_info cl']/h1/a/font/text()").get()
-            forum_item["title"] = (response.xpath("//div[@class='nthread_info cl']/h1/span/text()").get() or "").strip()
-            # NOTE: 这里会把点评一起保存到raw_content中，考虑一下是否需要单独处理
-            forum_item["raw_content"] = first_post_box.xpath(".//div[@class='t_fsz']").get()
+            forum_item["category_tag"] = category_tag
+            forum_item["title"] = title
+            forum_item["raw_content"] = raw_content
             forum_item["status_flags"] = response.meta["status_flags"]
             forum_item["likes"] = safe_int(response.xpath("//span[@id='recommendv_add']/text()").get()) or -1
             forum_item["dislikes"] = -1
             forum_item["collections"] = safe_int(response.xpath("//span[@id='favoritenumber']/text()").get()) or -1
             forum_item["comments"] = find_int_from_str(response.xpath("//div[@class='authi mb5']/span[@class='y']/text()").get()) or -1
             forum_item["views"] = find_int_from_str(response.xpath("//div[@class='authi mb5']/span[@class='mr10 y']/text()").get()) or -1
-        
-            # 下面几个在pipeline里面完成
-            # forum_item["clean_content"] = None
-            # forum_item["files_urls"] = []
-            
+                    
             yield forum_item
+            
+            # 继续处理主贴点评
+            comment_containers = first_post_box.xpath(".//div[starts-with(@id, 'comment_')]")
+            for comment_container in comment_containers:
+                comment_id_attr = comment_container.xpath("./@id").get()
+                if not comment_id_attr:
+                    continue
+                comment_source_id = comment_id_attr.split("comment_")[-1].strip()
+                
+                featured_posts = comment_container.xpath("./div")
+                inner_floor = 0
+                for featured_post in featured_posts:
+                    inner_floor += 1
+                    featured_post_item = CSIForumItem()
+                    
+                    raw_content = featured_post.xpath("./div[@class='psti']/text()").get() or ""
+                    author_href = featured_post.xpath(".//div/a/@href").get()
+                    author_id = None
+                    if author_href and "&uid=" in author_href:
+                        author_id = author_href.split("&uid=")[-1].strip()
+                    
+                    author_name_elem = featured_post.xpath("(.//div/a/text())[last()]").get()
+                    author_name = author_name_elem.strip() if author_name_elem else None
+                    
+                    if not raw_content or not author_id or not author_name:
+                        continue
+                    
+                    featured_post_item["uuid"] = generate_uuid(comment_source_id + str(last_edit_at) + raw_content)
+                    featured_post_item["topic_id"] = tid
+                    featured_post_item["source_id"] = comment_source_id
+                    featured_post_item["url"] = response.url
+                    featured_post_item["platform"] = self.name
+                    featured_post_item["section"] = response.meta["section"]
+                    featured_post_item["spider_name"] = "csi_crawlers-javbus"
+                    featured_post_item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    featured_post_item["publish_at"] = response.xpath("//span[@class='mr10']/text()").get()
+                    featured_post_item["last_edit_at"] = last_edit_at
+                    featured_post_item["author_id"] = author_id
+                    featured_post_item["author_name"] = author_name
+                    featured_post_item["nsfw"] = True
+                    featured_post_item["aigc"] = False
+                    featured_post_item["parent_id"] = source_id
+                    featured_post_item["floor"] = inner_floor
+                    featured_post_item["thread_type"] = "featured"
+                    featured_post_item["category_tag"] = category_tag
+                    featured_post_item["title"] = title
+                    featured_post_item["raw_content"] = raw_content
+                    featured_post_item["status_flags"] = []
+                    featured_post_item["likes"] = -1
+                    featured_post_item["dislikes"] = -1
+                    featured_post_item["collections"] = -1
+                    featured_post_item["comments"] = -1
+                    featured_post_item["views"] = -1
+                    
+                    yield featured_post_item
 
         # 处理评论
         post_boxes = response.xpath("//div[@class='nthread_postbox']")
@@ -229,3 +286,4 @@ class JavbusSpider(BaseSpider):
             pass
         
         # TODO: 翻页
+        

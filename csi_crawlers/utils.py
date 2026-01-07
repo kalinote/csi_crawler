@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+import hashlib
 
 def find_datetime_from_str(text: str) -> str:
     """
@@ -72,3 +73,9 @@ def safe_int(text: str) -> int:
         return int(text)
     except ValueError:
         return None
+
+def generate_uuid(str_data: str) -> str:
+    """
+    生成一个唯一的UUID
+    """
+    return hashlib.md5(str_data.encode()).hexdigest()

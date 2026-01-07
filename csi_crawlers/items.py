@@ -1,6 +1,9 @@
 import scrapy
 
 class CSIUserItem(scrapy.Item):
+    """
+    用户item
+    """
     uuid = scrapy.Field()
     user_id = scrapy.Field()
     screen_name = scrapy.Field()
@@ -18,7 +21,11 @@ class CSIUserItem(scrapy.Item):
     birthday = scrapy.Field()
     
 class CSIForumItem(scrapy.Item):
+    """
+    论坛item
+    """
     uuid = scrapy.Field()
+    topic_id = scrapy.Field()
     source_id = scrapy.Field()
     url = scrapy.Field()
     platform = scrapy.Field()
@@ -31,7 +38,6 @@ class CSIForumItem(scrapy.Item):
     author_name = scrapy.Field()
     nsfw = scrapy.Field()
     aigc = scrapy.Field()
-    root_id = scrapy.Field()
     parent_id = scrapy.Field()
     floor = scrapy.Field()
     thread_type = scrapy.Field()
@@ -44,6 +50,6 @@ class CSIForumItem(scrapy.Item):
     collections = scrapy.Field()
     comments = scrapy.Field()
     views = scrapy.Field()
-    # 下面几个在pipeline里面完成
+    # 下面几个在分析器里面完成
     clean_content = scrapy.Field()
     files_urls = scrapy.Field()
