@@ -57,3 +57,14 @@ class CSIForumItem(CSICommonFields):
     collections = scrapy.Field()
     comments = scrapy.Field()
     views = scrapy.Field()
+
+class CSIArticlesItem(CSICommonFields):
+    """
+    文章与资讯item
+    """
+    title = scrapy.Field()
+    clean_content = scrapy.Field()
+    raw_content = scrapy.Field()
+    translation_content = scrapy.Field()
+    safe_raw_content = scrapy.Field()
+    cover_image = scrapy.Field()

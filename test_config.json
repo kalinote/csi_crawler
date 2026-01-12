@@ -20,7 +20,7 @@
     "outputs": {
         "data_out": {
             "type": "reference",
-            "value": ["tmp_queue_1", "tmp_queue_2"]
+            "value": ["local_crawl_test"]
         }
     }
 }

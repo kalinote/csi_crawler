@@ -12,6 +12,9 @@ class BaseSpider(scrapy.Spider):
     - keywords: 关键词
     - crawler_type: 爬虫类型
     """
+    name = None
+    start_url = None
+    
     def __init__(self, rabbitmq_queue=None, page=None, start_time=None, end_time=None, keywords=None, crawler_type=None, *args, **kwargs):
         super(BaseSpider, self).__init__(*args, **kwargs)
         
@@ -72,3 +75,24 @@ class BaseSpider(scrapy.Spider):
         else:
             self.crawler_type = 'default'
             
+    async def start(self):
+        if self.crawler_type == 'default':
+            next_call = self.default_start
+        elif self.crawler_type == 'keyword':
+            if not self.keywords:
+                raise ValueError('关键词不能为空')
+            next_call = self.search_start
+        else:
+            raise ValueError(f'不支持的爬虫类型: {self.crawler_type}')
+        
+        yield scrapy.Request(
+            url=self.start_url,
+            callback=next_call
+        )
+            
+    def default_start(self, response):
+        raise NotImplementedError('default_start 方法未实现')
+    
+    def search_start(self, response):
+        raise NotImplementedError('search_start 方法未实现')
+    

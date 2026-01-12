@@ -15,24 +15,9 @@ class JavbusSpider(BaseSpider):
     allowed_domains = ["www.javbus.com"]
     
     crawled_users = []
-    
-    async def start(self):
-        # 先去主页获取一个默认的 phpsessid
-        if self.crawler_type == 'default':
-            next_call = self.goto_forum
-        elif self.crawler_type == 'keyword':
-            if not self.keywords:
-                raise ValueError('关键词不能为空')
-            next_call = self.goto_search
-        else:
-            raise ValueError(f'不支持的爬虫类型: {self.crawler_type}')
-        
-        yield scrapy.Request(
-            url="https://www.javbus.com/",
-            callback=next_call
-        )
+    start_url = "https://www.javbus.com/"
 
-    def goto_search(self, response: HtmlResponse):
+    def search_start(self, response: HtmlResponse):
         yield scrapy.Request(
             url="https://www.javbus.com/forum/search.php?mod=forum",
             callback=self.post_search
@@ -109,7 +94,7 @@ class JavbusSpider(BaseSpider):
         else:
             self.logger.info(f"关键词 '{keyword}' 已到达最后一页，当前第 {current_page} 页")
 
-    def goto_forum(self, response: HtmlResponse):
+    def default_start(self, response: HtmlResponse):
         yield scrapy.Request(
             url="https://www.javbus.com/forum/forum.php?mod=forumdisplay&fid=2",
             callback=self.parse_forum,
@@ -174,7 +159,7 @@ class JavbusSpider(BaseSpider):
         item["topic_id"] = tid
         item["url"] = response.url
         item["platform"] = self.name
-        item["spider_name"] = "csi_crawlers-javbus"
+        item["spider_name"] = "csi_crawlers-" + self.name
         item["section"] = section
         item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item["nsfw"] = True
