@@ -1,5 +1,25 @@
 import scrapy
 
+class CSICommonFields(scrapy.Item):
+    """
+    通用字段
+    """
+    uuid = scrapy.Field()
+    source_id = scrapy.Field()
+    data_version = scrapy.Field()
+    entity_type = scrapy.Field()
+    url = scrapy.Field()
+    platform = scrapy.Field()
+    section = scrapy.Field()
+    spider_name = scrapy.Field()
+    crawled_at = scrapy.Field()
+    publish_at = scrapy.Field()
+    last_edit_at = scrapy.Field()
+    author_id = scrapy.Field()
+    author_name = scrapy.Field()
+    nsfw = scrapy.Field()
+    aigc = scrapy.Field()
+
 class CSIUserItem(scrapy.Item):
     """
     用户item
@@ -20,25 +40,11 @@ class CSIUserItem(scrapy.Item):
     sex = scrapy.Field()
     birthday = scrapy.Field()
     
-class CSIForumItem(scrapy.Item):
+class CSIForumItem(CSICommonFields):
     """
     论坛item
     """
-    entity_type = scrapy.Field(default="forum")
-    uuid = scrapy.Field()
     topic_id = scrapy.Field()
-    source_id = scrapy.Field()
-    url = scrapy.Field()
-    platform = scrapy.Field()
-    section = scrapy.Field()
-    spider_name = scrapy.Field()
-    crawled_at = scrapy.Field()
-    publish_at = scrapy.Field()
-    last_edit_at = scrapy.Field()
-    author_id = scrapy.Field()
-    author_name = scrapy.Field()
-    nsfw = scrapy.Field()
-    aigc = scrapy.Field()
     parent_id = scrapy.Field()
     floor = scrapy.Field()
     thread_type = scrapy.Field()
@@ -51,6 +57,3 @@ class CSIForumItem(scrapy.Item):
     collections = scrapy.Field()
     comments = scrapy.Field()
     views = scrapy.Field()
-    # 下面几个在分析器里面完成
-    clean_content = scrapy.Field()
-    files_urls = scrapy.Field()

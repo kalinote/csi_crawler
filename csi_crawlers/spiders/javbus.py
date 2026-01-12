@@ -170,6 +170,7 @@ class JavbusSpider(BaseSpider):
         """辅助方法：初始化基础 Item 并填充通用字段"""
         item = CSIForumItem()
         item["entity_type"] = "forum"
+        item["data_version"] = 1
         item["topic_id"] = tid
         item["url"] = response.url
         item["platform"] = self.name
