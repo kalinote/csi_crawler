@@ -68,3 +68,4 @@ class CSIArticlesItem(CSICommonFields):
     translation_content = scrapy.Field()
     safe_raw_content = scrapy.Field()
     cover_image = scrapy.Field()
+    likes = scrapy.Field()

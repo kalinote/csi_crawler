@@ -4,9 +4,9 @@ from scrapy.http import Response
 from urllib.parse import urlparse
 from csi_crawlers.items import CSIArticlesItem
 from csi_crawlers.spiders.base import BaseSpider
-from csi_crawlers.utils import find_datetime_from_str, generate_uuid
+from csi_crawlers.utils import find_datetime_from_str, generate_uuid, safe_int
 
-
+# TODO: 关键词采集
 
 class BearblogSpider(BaseSpider):
     name = "bearblog"
@@ -15,12 +15,37 @@ class BearblogSpider(BaseSpider):
 
     def default_start(self, response: Response):
         url = "https://bearblog.dev/discover/?page=0"
-        yield scrapy.Request(url, callback=self.parse_post_list)
+        yield scrapy.Request(url, callback=self.parse_post_list, meta={"current_page": 0})
 
     def parse_post_list(self, response: Response):
+        current_page = response.meta.get("current_page", 0)
+        self.logger.info(f"正在爬取列表页第 {current_page} 页")
+        
         urls = response.xpath('//ul[@class="discover-posts"]/li/div/a/@href').getall()
         for url in urls:
             yield response.follow(url, callback=self.parse_innerpage)
+
+        # 翻页逻辑
+        # 判断是否存在文本包含 Next 的 a 标签
+        has_next = response.xpath('//a[contains(text(), "Next")]').get()
+        
+        if has_next:
+            should_continue = False
+            if (self.page is None or self.page <= 0) or (current_page + 1 < self.page):
+                should_continue = True
+            
+            if should_continue:
+                next_page = current_page + 1
+                url = f"https://bearblog.dev/discover/?page={next_page}"
+                self.logger.info(f"5秒后将爬取列表页第 {next_page} 页")
+                yield scrapy.Request(
+                    url, 
+                    callback=self.parse_post_list, 
+                    meta={'current_page': next_page, 'download_delay': 5},
+                    dont_filter=True
+                )
+        else:
+            self.logger.info(f"已到达最后一页，当前第 {current_page} 页")
 
     def parse_search_list(self, response: Response):
         pass
@@ -37,9 +62,6 @@ class BearblogSpider(BaseSpider):
         source_id = response.url.strip("/").split("/")[-1]
         last_edit_at = find_datetime_from_str(response.xpath("//time/@datetime").get())
         raw_content = response.xpath('//main').get() or ""
-        
-
-        # 点赞 //small[@class="upvote-count"]/text()
 
         item["uuid"] = generate_uuid(source_id + str(last_edit_at) + raw_content)
         item["source_id"] = source_id
@@ -58,5 +80,6 @@ class BearblogSpider(BaseSpider):
         item["aigc"] = False
         item["title"] = (response.xpath('//main/h1/text()').get() or "").strip() or None
         item["raw_content"] = response.xpath('//main').get() or ""
+        item["likes"] = safe_int(response.xpath('//small[@class="upvote-count"]/text()').get()) or -1
 
         yield item

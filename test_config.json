@@ -5,7 +5,7 @@
     },
     "config": {
         "page": 2,
-        "crawler_type": "keyword"
+        "crawler_type": "default"
     },
     "inputs": {
         "keywords": {
@@ -14,7 +14,7 @@
         },
         "platforms": {
             "type": "value",
-            "value": ["javbus"]
+            "value": ["bearblog"]
         }
     },
     "outputs": {
