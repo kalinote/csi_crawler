@@ -2,7 +2,16 @@ import scrapy
 
 
 class BaseSpider(scrapy.Spider):
-    
+    """
+    基本爬虫类，自动解析通用命令行参数
+
+    - rabbitmq_queue: RabbitMQ 队列
+    - page: 页数
+    - start_time: 开始时间
+    - end_time: 结束时间
+    - keywords: 关键词
+    - crawler_type: 爬虫类型
+    """
     def __init__(self, rabbitmq_queue=None, page=None, start_time=None, end_time=None, keywords=None, crawler_type=None, *args, **kwargs):
         super(BaseSpider, self).__init__(*args, **kwargs)
         
