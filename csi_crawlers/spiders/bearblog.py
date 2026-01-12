@@ -6,8 +6,6 @@ from csi_crawlers.items import CSIArticlesItem
 from csi_crawlers.spiders.base import BaseSpider
 from csi_crawlers.utils import find_datetime_from_str, generate_uuid, safe_int
 
-# TODO: 关键词采集
-
 class BearblogSpider(BaseSpider):
     name = "bearblog"
     allowed_domains = ["bearblog.dev"]
@@ -19,11 +17,19 @@ class BearblogSpider(BaseSpider):
 
     def parse_post_list(self, response: Response):
         current_page = response.meta.get("current_page", 0)
-        self.logger.info(f"正在爬取列表页第 {current_page} 页")
+        is_search = response.meta.get("is_search", False)
+        
+        if is_search:
+            self.logger.info("正在解析搜索结果")
+        else:
+            self.logger.info(f"正在爬取列表页第 {current_page} 页")
         
         urls = response.xpath('//ul[@class="discover-posts"]/li/div/a/@href').getall()
         for url in urls:
             yield response.follow(url, callback=self.parse_innerpage)
+
+        if is_search:
+            return
 
         # 翻页逻辑
         # 判断是否存在文本包含 Next 的 a 标签
@@ -47,8 +53,34 @@ class BearblogSpider(BaseSpider):
         else:
             self.logger.info(f"已到达最后一页，当前第 {current_page} 页")
 
-    def parse_search_list(self, response: Response):
-        pass
+    def search_start(self, response: Response):
+        self.logger.info(f"开始关键词搜索，关键词数量: {len(self.keywords)}")
+        # 获取搜索页以提取 CSRF token
+        yield scrapy.Request(
+            url="https://bearblog.dev/discover/search/",
+            callback=self.parse_search_token,
+            dont_filter=True
+        )
+
+    def parse_search_token(self, response: Response):
+        token = response.xpath('//input[@name="csrfmiddlewaretoken"]/@value').get()
+        if not token:
+            self.logger.error("无法获取 csrfmiddlewaretoken")
+            return
+
+        url = "https://bearblog.dev/discover/search/"
+        for keyword in self.keywords:
+            self.logger.info(f"正在搜索关键词: {keyword}")
+            yield scrapy.FormRequest(
+                url=url,
+                formdata={
+                    'csrfmiddlewaretoken': token,
+                    'query': keyword
+                },
+                callback=self.parse_post_list,
+                meta={'is_search': True},
+                dont_filter=True
+            )
 
     def parse_innerpage(self, response: Response):
         # 先跳过不是 bearblog.dev 站点的

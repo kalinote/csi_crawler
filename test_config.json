@@ -5,12 +5,12 @@
     },
     "config": {
         "page": 2,
-        "crawler_type": "default"
+        "crawler_type": "keyword"
     },
     "inputs": {
         "keywords": {
             "type": "value",
-            "value": ["黑丝"]
+            "value": ["mine", "craft"]
         },
         "platforms": {
             "type": "value",

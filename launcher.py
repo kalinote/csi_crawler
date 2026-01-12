@@ -1,5 +1,6 @@
 import sys
 import os
+import argparse
 
 # 将项目根目录加入 python 搜索路径并设置 settings 模块
 root_dir = os.path.dirname(os.path.abspath(__file__))
@@ -186,8 +187,40 @@ def main():
         logger.info(f"解析的爬虫参数: {spider_args}")
         
         monitor = SpiderMonitor(len(platforms), node)
+
+        # 解析命令行参数
+        parser = argparse.ArgumentParser()
+        parser.add_argument('-o', '--output', help='输出结果到文件')
+        args, _ = parser.parse_known_args()
         
         settings = get_project_settings()
+
+        if args.output:
+            output_file = args.output
+            # Scrapy 的命令行工具是在参数解析阶段推断格式的，
+            # 在代码中直接设置 FEEDS 时必须显式指定 format，否则会报 KeyError
+            _, ext = os.path.splitext(output_file)
+            ext = ext.lower()
+            
+            # 简单的映射表
+            ext_map = {
+                '.jsonl': 'jsonlines',
+                '.csv': 'csv',
+                '.xml': 'xml',
+                '.json': 'json'
+            }
+            # 默认为 json
+            out_format = ext_map.get(ext, 'json')
+            
+            settings.set('FEEDS', {
+                output_file: {
+                    'format': out_format,
+                    'encoding': 'utf8',
+                    'indent': 4,
+                }
+            }, priority='cmdline')
+            logger.info(f"已启用文件输出: {output_file} (格式: {out_format})")
+            
         process = CrawlerProcess(settings)
         
         for spider_name in platforms:
@@ -199,7 +232,7 @@ def main():
                 crawler.signals.connect(monitor.on_item_scraped, signal=signals.item_scraped)
                 crawler.signals.connect(monitor.on_spider_error, signal=signals.spider_error)
                 
-                process.crawl(crawler, **spider_args)
+                process.crawl(crawler, **spider_args) 
                 
                 logger.info(f"爬虫 {spider_name} 已加入执行队列")
             except KeyError as e:
