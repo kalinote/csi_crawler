@@ -1,9 +1,9 @@
 import scrapy
 import json
 from scrapy.http import Response, JsonRequest, JsonResponse, headers
-from csi_spider_dev.items import CSIArticlesItem
-from csi_spider_dev.utils import generate_uuid, safe_int
-from csi_spider_dev.spiders.base import BaseSpider
+from csi_crawlers.items import CSIArticlesItem
+from csi_crawlers.utils import generate_uuid, safe_int
+from csi_crawlers.spiders.base import BaseSpider
 import datetime
 
 
@@ -58,7 +58,7 @@ class ThepaperSpider(BaseSpider):
         if last_edit_at:
             last_edit_at = datetime.datetime.fromtimestamp(int(last_edit_at) / 1000).strftime('%Y-%m-%d %H:%M:%S')
         raw_content = content_detail.get("content")
-        uuid = generate_uuid(source_id + str(last_edit_at) + raw_content)
+        uuid = generate_uuid("article" + source_id + str(last_edit_at) + raw_content)
 
         tags = []
         for t in content_detail.get("tagList", []):

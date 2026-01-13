@@ -94,7 +94,7 @@ class BearblogSpider(BaseSpider):
         last_edit_at = find_datetime_from_str(response.xpath("//time/@datetime").get())
         raw_content = response.xpath('//main').get() or ""
 
-        item["uuid"] = generate_uuid(source_id + str(last_edit_at) + raw_content)
+        item["uuid"] = generate_uuid("article" + source_id + str(last_edit_at) + raw_content)
         item["source_id"] = source_id
         item["data_version"] = 1
         item["entity_type"] = "article"

@@ -204,7 +204,7 @@ class JavbusSpider(BaseSpider):
                 item = self._init_base_item(response, tid, section)
                 
                 # 填充特定字段
-                item["uuid"] = generate_uuid(source_id + str(parent_last_edit_at) + raw_content)
+                item["uuid"] = generate_uuid("forum" + source_id + str(parent_last_edit_at) + raw_content)
                 item["source_id"] = source_id
                 item["publish_at"] = find_datetime_from_str(featured_post.xpath('.//div[@class="psti"]/span/text()').get())
                 item["last_edit_at"] = item["publish_at"] # 点评通常没有编辑时间，视作同发布时间
@@ -258,7 +258,7 @@ class JavbusSpider(BaseSpider):
                 forum_item["author_name"] = author_info_box.xpath(".//div[@class='authi']/a/text()").get()
             
             forum_item.update({
-                "uuid": generate_uuid(source_id + str(last_edit_at) + raw_content),
+                "uuid": generate_uuid("forum" + source_id + str(last_edit_at) + raw_content),
                 "source_id": source_id,
                 "publish_at": response.xpath("//span[@class='mr10']/text()").get(),
                 "last_edit_at": last_edit_at,
@@ -302,7 +302,7 @@ class JavbusSpider(BaseSpider):
             comment_item = self._init_base_item(response, tid, section)
             
             comment_item.update({
-                "uuid": generate_uuid(comment_source_id + str(comment_last_edit_at) + comment_raw_content),
+                "uuid": generate_uuid("forum" + comment_source_id + str(comment_last_edit_at) + comment_raw_content),
                 "source_id": comment_source_id,
                 "publish_at": comment_last_edit_at,
                 "last_edit_at": comment_last_edit_at,
