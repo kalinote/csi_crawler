@@ -85,10 +85,14 @@ class BaseSpider(scrapy.Spider):
         else:
             raise ValueError(f'不支持的爬虫类型: {self.crawler_type}')
         
-        yield scrapy.Request(
-            url=self.start_url,
-            callback=next_call
-        )
+        if not self.start_url:
+            for request_or_item in next_call(response=None):
+                yield request_or_item
+        else:
+            yield scrapy.Request(
+                url=self.start_url,
+                callback=next_call
+            )
             
     def default_start(self, response):
         raise NotImplementedError('default_start 方法未实现')

@@ -9,9 +9,8 @@ from csi_crawlers.utils import find_datetime_from_str, generate_uuid, safe_int
 class BearblogSpider(BaseSpider):
     name = "bearblog"
     allowed_domains = ["bearblog.dev"]
-    start_url = "https://bearblog.dev"
 
-    def default_start(self, response: Response):
+    def default_start(self, response):
         url = "https://bearblog.dev/discover/?page=0"
         yield scrapy.Request(url, callback=self.parse_post_list, meta={"current_page": 0})
 
@@ -53,7 +52,7 @@ class BearblogSpider(BaseSpider):
         else:
             self.logger.info(f"已到达最后一页，当前第 {current_page} 页")
 
-    def search_start(self, response: Response):
+    def search_start(self, response):
         self.logger.info(f"开始关键词搜索，关键词数量: {len(self.keywords)}")
         # 获取搜索页以提取 CSRF token
         yield scrapy.Request(
