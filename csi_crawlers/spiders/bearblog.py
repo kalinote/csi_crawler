@@ -100,7 +100,7 @@ class BearblogSpider(BaseSpider):
         item["entity_type"] = "article"
         item["url"] = response.url
         item["platform"] = self.name
-        item["section"] = "discover"
+        item["section"] = "discover" # TODO: 这里需要按实际情况修改
         item["spider_name"] = "csi_crawlers-" + self.name
         item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item["publish_at"] = last_edit_at

@@ -71,9 +71,10 @@ def safe_int(text: str) -> int:
     将字符串转换为整数，如果转换失败则返回 None
     """
     try:
-        return int(text)
+        number = int(text)
     except ValueError:
         return None
+    return number
 
 def generate_uuid(str_data: str) -> str:
     """

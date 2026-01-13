@@ -9,6 +9,7 @@ class CSICommonFields(scrapy.Item):
     data_version = scrapy.Field()
     entity_type = scrapy.Field()
     url = scrapy.Field()
+    tags = scrapy.Field()
     platform = scrapy.Field()
     section = scrapy.Field()
     spider_name = scrapy.Field()
