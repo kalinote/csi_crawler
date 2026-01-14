@@ -30,7 +30,7 @@ class ThepaperSpider(BaseSpider):
                 "pageSize": 50,
                 "startTime": ""
             },
-            callback=self.parse_news_list
+            callback=self.parse_default_list
         )
     
     def search_start(self, response):
@@ -45,10 +45,47 @@ class ThepaperSpider(BaseSpider):
                     "pageSize": 100,
                     "searchType": 1
                 },
-                callback=self.parse_news_list
+                callback=self.parse_search_list,
+                meta={"keyword": keyword, "current_page": 1}
             )
     
-    def parse_news_list(self, response: JsonResponse):
+    def parse_search_list(self, response: JsonResponse):
+        data = response.json()
+        data_obj = data.get("data", {})
+        
+        for item in data_obj.get("list", []):
+            yield scrapy.Request(
+                url=f"https://www.thepaper.cn/newsDetail_forward_{item.get('contId')}",
+                callback=self.parse_detail
+            )
+        
+        keyword = response.meta.get("keyword")
+        current_page = response.meta.get("current_page", 1)
+        has_next = data_obj.get("hasNext", False)
+        
+        should_continue = False
+        if self.page is None or self.page <= 0:
+            should_continue = has_next
+        else:
+            should_continue = current_page < self.page
+        
+        if should_continue:
+            next_page = current_page + 1
+            yield JsonRequest(
+                url="https://api.thepaper.cn/search/web/news",
+                headers=self.headers,
+                data={
+                    "word": keyword,
+                    "orderType": 1,
+                    "pageNum": next_page,
+                    "pageSize": 100,
+                    "searchType": 1
+                },
+                callback=self.parse_search_list,
+                meta={"keyword": keyword, "current_page": next_page}
+            )
+    
+    def parse_default_list(self, response: JsonResponse):
         data = response.json()
         for item in data.get("data", {}).get("list", []):
             yield scrapy.Request(
