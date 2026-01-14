@@ -18,7 +18,6 @@ class ThepaperSpider(BaseSpider):
     # TODO: 暂时这样写，后续通过启动参数传递代理和账号配置
     use_proxy = False
 
-    # TODO: 翻页待实现
     def default_start(self, response):
         yield JsonRequest(
             url="https://api.thepaper.cn/contentapi/nodeCont/getByChannelId",
@@ -27,10 +26,12 @@ class ThepaperSpider(BaseSpider):
                 "channelId": "",
                 "excludeContIds": [],
                 "listRecommendIds": [],
+                "pageNum": 1,
                 "pageSize": 50,
                 "startTime": ""
             },
-            callback=self.parse_default_list
+            callback=self.parse_default_list,
+            meta={"current_page": 1}
         )
     
     def search_start(self, response):
@@ -91,13 +92,42 @@ class ThepaperSpider(BaseSpider):
     
     def parse_default_list(self, response: JsonResponse):
         data = response.json()
-        for item in data.get("data", {}).get("list", []):
+        data_obj = data.get("data", {})
+        
+        for item in data_obj.get("list", []):
             yield scrapy.Request(
                 url=f"https://www.thepaper.cn/newsDetail_forward_{item.get('contId')}",
                 callback=self.parse_detail,
                 meta={
                     "section": "要闻"
                 }
+            )
+        
+        current_page = response.meta.get("current_page", 1)
+        has_next = data_obj.get("hasNext", False)
+        start_time = data_obj.get("startTime")
+        
+        should_continue = False
+        if self.page is None or self.page <= 0:
+            should_continue = has_next
+        else:
+            should_continue = has_next and current_page < self.page
+        
+        if should_continue and start_time is not None:
+            next_page = current_page + 1
+            yield JsonRequest(
+                url="https://api.thepaper.cn/contentapi/nodeCont/getByChannelId",
+                headers=self.headers,
+                data={
+                    "channelId": "",
+                    "excludeContIds": [],
+                    "listRecommendIds": [],
+                    "pageNum": next_page,
+                    "pageSize": 50,
+                    "startTime": str(start_time)
+                },
+                callback=self.parse_default_list,
+                meta={"current_page": next_page}
             )
 
     def parse_detail(self, response: Response):
@@ -144,7 +174,7 @@ class ThepaperSpider(BaseSpider):
         item["title"] = content_detail.get("name")
         item["raw_content"] = raw_content
         item["cover_image"] = content_detail.get("pic")
-        # TODO: 点赞无法直接从返回数据中获取
+        # 点赞无法直接从返回数据中获取，先不管
         item["likes"] = -1
 
         yield item
