@@ -82,7 +82,11 @@ class ThepaperSpider(BaseSpider):
                     "searchType": 1
                 },
                 callback=self.parse_search_list,
-                meta={"keyword": keyword, "current_page": next_page}
+                meta={
+                    "keyword": keyword,
+                    "current_page": next_page,
+                    "section": "关键词搜索"
+                }
             )
     
     def parse_default_list(self, response: JsonResponse):
@@ -90,7 +94,10 @@ class ThepaperSpider(BaseSpider):
         for item in data.get("data", {}).get("list", []):
             yield scrapy.Request(
                 url=f"https://www.thepaper.cn/newsDetail_forward_{item.get('contId')}",
-                callback=self.parse_detail
+                callback=self.parse_detail,
+                meta={
+                    "section": "要闻"
+                }
             )
 
     def parse_detail(self, response: Response):
@@ -125,7 +132,7 @@ class ThepaperSpider(BaseSpider):
         item["url"] = response.url
         item["tags"] = tags
         item["platform"] = self.name
-        item["section"] = None # TODO: 这里需要按实际情况修改
+        item["section"] = response.meta.get("section")
         item["spider_name"] = "csi_crawlers-" + self.name
         item["crawled_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item["publish_at"] = publish_at
@@ -141,3 +148,4 @@ class ThepaperSpider(BaseSpider):
         item["likes"] = -1
 
         yield item
+        

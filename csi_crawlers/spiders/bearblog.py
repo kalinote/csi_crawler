@@ -12,7 +12,7 @@ class BearblogSpider(BaseSpider):
 
     def default_start(self, response):
         url = "https://bearblog.dev/discover/?page=0"
-        yield scrapy.Request(url, callback=self.parse_post_list, meta={"current_page": 0})
+        yield scrapy.Request(url, callback=self.parse_post_list, meta={"current_page": 0, "section": "discover"})
 
     def parse_post_list(self, response: Response):
         current_page = response.meta.get("current_page", 0)
@@ -25,8 +25,9 @@ class BearblogSpider(BaseSpider):
         
         urls = response.xpath('//ul[@class="discover-posts"]/li/div/a/@href').getall()
         for url in urls:
-            yield response.follow(url, callback=self.parse_innerpage)
+            yield response.follow(url, callback=self.parse_innerpage, meta={"section": response.meta.get("section")})
 
+        # 搜索不需要翻页
         if is_search:
             return
 
@@ -46,7 +47,11 @@ class BearblogSpider(BaseSpider):
                 yield scrapy.Request(
                     url, 
                     callback=self.parse_post_list, 
-                    meta={'current_page': next_page, 'download_delay': 5},
+                    meta={
+                        'current_page': next_page,
+                        'download_delay': 5,
+                        'section': response.meta.get("section")
+                    },
                     dont_filter=True
                 )
         else:
@@ -77,7 +82,10 @@ class BearblogSpider(BaseSpider):
                     'query': keyword
                 },
                 callback=self.parse_post_list,
-                meta={'is_search': True},
+                meta={
+                    'is_search': True,
+                    'section': '关键词搜索'
+                },
                 dont_filter=True
             )
 
@@ -100,7 +108,7 @@ class BearblogSpider(BaseSpider):
         item["entity_type"] = "article"
         item["url"] = response.url
         item["platform"] = self.name
-        item["section"] = "discover" # TODO: 这里需要按实际情况修改
+        item["section"] = response.meta.get("section")
         item["spider_name"] = "csi_crawlers-" + self.name
         item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item["publish_at"] = last_edit_at
