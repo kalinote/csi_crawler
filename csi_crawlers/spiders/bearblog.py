@@ -107,7 +107,7 @@ class BearblogSpider(BaseSpider):
         item["data_version"] = 1
         item["entity_type"] = "article"
         item["url"] = response.url
-        item["platform"] = self.name
+        item["platform"] = "Bearblog"
         item["section"] = response.meta.get("section")
         item["spider_name"] = "csi_crawlers-" + self.name
         item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

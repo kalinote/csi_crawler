@@ -158,7 +158,7 @@ class JavbusSpider(BaseSpider):
         item["data_version"] = 1
         item["topic_id"] = tid
         item["url"] = response.url
-        item["platform"] = self.name
+        item["platform"] = "Javbus"
         item["spider_name"] = "csi_crawlers-" + self.name
         item["section"] = section
         item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

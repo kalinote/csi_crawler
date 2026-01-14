@@ -15,9 +15,6 @@ class ThepaperSpider(BaseSpider):
         "content-type": "application/json",
     }
 
-    # TODO: 暂时这样写，后续通过启动参数传递代理和账号配置
-    use_proxy = False
-
     def default_start(self, response):
         yield JsonRequest(
             url="https://api.thepaper.cn/contentapi/nodeCont/getByChannelId",
@@ -161,7 +158,7 @@ class ThepaperSpider(BaseSpider):
         item["entity_type"] = "article"
         item["url"] = response.url
         item["tags"] = tags
-        item["platform"] = self.name
+        item["platform"] = "澎湃新闻"
         item["section"] = response.meta.get("section")
         item["spider_name"] = "csi_crawlers-" + self.name
         item["crawled_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

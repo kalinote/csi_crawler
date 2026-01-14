@@ -13,6 +13,7 @@ class BaseSpider(scrapy.Spider):
     - crawler_type: 爬虫类型
     """
     name = None
+    # start_url 适用于某些需要先去指定页面获取token类信息的情况
     start_url = None
     
     def __init__(self, rabbitmq_queue=None, page=None, start_time=None, end_time=None, keywords=None, crawler_type=None, *args, **kwargs):
