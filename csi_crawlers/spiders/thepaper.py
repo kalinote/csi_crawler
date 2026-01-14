@@ -2,7 +2,7 @@ import scrapy
 import json
 from scrapy.http import Response, JsonRequest, JsonResponse, headers
 from csi_crawlers.items import CSIArticlesItem
-from csi_crawlers.utils import generate_uuid, safe_int
+from csi_crawlers.utils import generate_uuid
 from csi_crawlers.spiders.base import BaseSpider
 import datetime
 
@@ -18,6 +18,7 @@ class ThepaperSpider(BaseSpider):
     # TODO: 暂时这样写，后续通过启动参数传递代理和账号配置
     use_proxy = False
 
+    # TODO: 翻页待实现
     def default_start(self, response):
         yield JsonRequest(
             url="https://api.thepaper.cn/contentapi/nodeCont/getByChannelId",
@@ -33,7 +34,19 @@ class ThepaperSpider(BaseSpider):
         )
     
     def search_start(self, response):
-        raise NotImplementedError('search_start 方法未实现')
+        for keyword in self.keywords:
+            yield JsonRequest(
+                url="https://api.thepaper.cn/search/web/news",
+                headers=self.headers,
+                data={
+                    "word": keyword,
+                    "orderType": 1,
+                    "pageNum": 1,
+                    "pageSize": 100,
+                    "searchType": 1
+                },
+                callback=self.parse_news_list
+            )
     
     def parse_news_list(self, response: JsonResponse):
         data = response.json()
@@ -87,7 +100,7 @@ class ThepaperSpider(BaseSpider):
         item["title"] = content_detail.get("name")
         item["raw_content"] = raw_content
         item["cover_image"] = content_detail.get("pic")
-        # TODO: 点赞的获取还有些问题
-        item["likes"] = safe_int(response.xpath('//div/div/div[contains(@class, "praiseNum")]/text()').get()) or -1
+        # TODO: 点赞无法直接从返回数据中获取
+        item["likes"] = -1
 
         yield item
