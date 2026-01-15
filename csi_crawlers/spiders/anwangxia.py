@@ -87,6 +87,7 @@ class AnwangxiaSpider(BaseSpider):
         item["nsfw"] = False
         item["aigc"] = False
         item["title"] = response.xpath('//h1[@class="entry-title"]/text()').get()
+        item["raw_content"] = raw_content
         item["cover_image"] = response.xpath('//figure/a/img/@src').get()
         item["likes"] = safe_int(response.xpath('//span[@class="entry-action-num"]/text()').get().replace("(", "").replace(")", ""))
 
