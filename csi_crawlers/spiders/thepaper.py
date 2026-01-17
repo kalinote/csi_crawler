@@ -160,7 +160,7 @@ class ThepaperSpider(BaseSpider):
         item["tags"] = tags
         item["platform"] = "澎湃新闻"
         item["section"] = response.meta.get("section")
-        item["spider_name"] = "csi_crawlers-" + self.name
+        item["spider_name"] = self.name
         item["crawled_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item["publish_at"] = publish_at
         item["last_edit_at"] = last_edit_at

@@ -78,7 +78,7 @@ class AnwangxiaSpider(BaseSpider):
         item["tags"] = response.xpath('//div[@class="entry-tag"]/a/text()').getall()
         item["platform"] = "暗网下"
         item["section"] = response.meta.get("section")
-        item["spider_name"] = "csi_crawlers-" + self.name
+        item["spider_name"] = self.name
         item["crawled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item["publish_at"] = last_edit_at
         item["last_edit_at"] = last_edit_at
