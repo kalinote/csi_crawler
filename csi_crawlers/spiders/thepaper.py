@@ -54,7 +54,10 @@ class ThepaperSpider(BaseSpider):
         for item in data_obj.get("list", []):
             yield scrapy.Request(
                 url=f"https://www.thepaper.cn/newsDetail_forward_{item.get('contId')}",
-                callback=self.parse_detail
+                callback=self.parse_detail,
+                meta={
+                    "section": "关键词搜索"
+                }
             )
         
         keyword = response.meta.get("keyword")
