@@ -167,8 +167,7 @@ class ThepaperSpider(BaseSpider):
         item["crawled_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item["publish_at"] = publish_at
         item["last_edit_at"] = last_edit_at
-        item["author_id"] = content_detail.get("author")
-        item["author_name"] = content_detail.get("author")
+        item["author_name"] =",".join((content_detail.get("author") or "").replace("/", "、").replace(" ", "、").split("、"))
         item["nsfw"] = False
         item["aigc"] = False
         item["title"] = content_detail.get("name")
