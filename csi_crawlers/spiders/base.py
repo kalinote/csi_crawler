@@ -16,7 +16,7 @@ class BaseSpider(scrapy.Spider):
     # start_url 适用于某些需要先去指定页面获取token类信息的情况
     start_url = None
     
-    def __init__(self, rabbitmq_queue=None, page=None, start_time=None, end_time=None, keywords=None, crawler_type=None, *args, **kwargs):
+    def __init__(self, rabbitmq_queue=None, page=None, start_time=None, end_time=None, keywords=None, crawler_type=None, sections=None, *args, **kwargs):
         super(BaseSpider, self).__init__(*args, **kwargs)
         
         if rabbitmq_queue:
@@ -75,6 +75,14 @@ class BaseSpider(scrapy.Spider):
                 self.logger.info(f'爬虫类型: {self.crawler_type}')
         else:
             self.crawler_type = 'default'
+        
+        if self.crawler_type == 'default':
+            if not sections:
+                raise ValueError('未知采集板块')
+            self.sections = sections
+            self.logger.info(f'采集板块: {self.sections}')
+        else:
+            self.sections = None
             
     async def start(self):
         if self.crawler_type == 'default':

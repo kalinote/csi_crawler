@@ -16,6 +16,10 @@ class JavbusSpider(BaseSpider):
     
     crawled_users = []
     start_url = "https://www.javbus.com/"
+    
+    section_map = {
+        "老司机福利讨论区": 2,
+    }
 
     def search_start(self, response: HtmlResponse):
         yield scrapy.Request(
@@ -95,15 +99,22 @@ class JavbusSpider(BaseSpider):
             self.logger.info(f"关键词 '{keyword}' 已到达最后一页，当前第 {current_page} 页")
 
     def default_start(self, response: HtmlResponse):
-        yield scrapy.Request(
-            url="https://www.javbus.com/forum/forum.php?mod=forumdisplay&fid=2",
-            callback=self.parse_forum,
-            meta={"current_page": 1}
-        )
+        for section in self.sections:
+            fid = self.section_map.get(section)
+            if not fid:
+                self.logger.error(f"未知采集板块: {section}")
+                continue
+            
+            yield scrapy.Request(
+                url=f"https://www.javbus.com/forum/forum.php?mod=forumdisplay&fid={fid}",
+                callback=self.parse_forum,
+                meta={"current_page": 1, "section": section}
+            )
 
     def parse_forum(self, response: HtmlResponse):
         current_page = response.meta.get("current_page", 1)
-        self.logger.info(f"正在爬取论坛列表第 {current_page} 页")
+        section = response.meta.get("section", "")
+        self.logger.info(f"正在爬取{section}论坛列表第 {current_page} 页")
         
         threads = response.xpath("//tbody[starts-with(@id, 'normalthread_')]")
         for thread in threads:
@@ -124,7 +135,7 @@ class JavbusSpider(BaseSpider):
                 callback=self.parse_thread,
                 meta={
                     "status_flags": status_flags,
-                    "section": "老司机福利讨论区"
+                    "section": section
                 }
             )
         

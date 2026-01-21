@@ -14,22 +14,35 @@ class ThepaperSpider(BaseSpider):
     headers = {
         "content-type": "application/json",
     }
+    
+    section_map = {
+        "要闻": "",
+    }
 
     def default_start(self, response):
-        yield JsonRequest(
-            url="https://api.thepaper.cn/contentapi/nodeCont/getByChannelId",
-            headers=self.headers,
-            data={
-                "channelId": "",
-                "excludeContIds": [],
-                "listRecommendIds": [],
-                "pageNum": 1,
-                "pageSize": 50,
-                "startTime": ""
-            },
-            callback=self.parse_default_list,
-            meta={"current_page": 1}
-        )
+        for section in self.sections:
+            channel_id = self.section_map.get(section)
+            if not channel_id:
+                self.logger.error(f"未知采集板块: {section}")
+                continue
+        
+            yield JsonRequest(
+                url="https://api.thepaper.cn/contentapi/nodeCont/getByChannelId",
+                headers=self.headers,
+                data={
+                    "channelId": channel_id,
+                    "excludeContIds": [],
+                    "listRecommendIds": [],
+                    "pageNum": 1,
+                    "pageSize": 50,
+                    "startTime": ""
+                },
+                callback=self.parse_default_list,
+                meta={
+                    "current_page": 1,
+                    "section": section
+                }
+            )
     
     def search_start(self, response):
         for keyword in self.keywords:
@@ -91,6 +104,11 @@ class ThepaperSpider(BaseSpider):
             )
     
     def parse_default_list(self, response: JsonResponse):
+        section = response.meta.get("section", "")
+        channel_id = self.section_map.get(section)
+        if not channel_id:
+            self.logger.error(f"未知采集板块: {section}")
+            return
         data = response.json()
         data_obj = data.get("data", {})
         
@@ -99,7 +117,7 @@ class ThepaperSpider(BaseSpider):
                 url=f"https://www.thepaper.cn/newsDetail_forward_{item.get('contId')}",
                 callback=self.parse_detail,
                 meta={
-                    "section": "要闻"
+                    "section": section
                 }
             )
         
@@ -119,7 +137,7 @@ class ThepaperSpider(BaseSpider):
                 url="https://api.thepaper.cn/contentapi/nodeCont/getByChannelId",
                 headers=self.headers,
                 data={
-                    "channelId": "",
+                    "channelId": channel_id,
                     "excludeContIds": [],
                     "listRecommendIds": [],
                     "pageNum": next_page,
@@ -127,7 +145,10 @@ class ThepaperSpider(BaseSpider):
                     "startTime": str(start_time)
                 },
                 callback=self.parse_default_list,
-                meta={"current_page": next_page}
+                meta={
+                    "current_page": next_page,
+                    "section": section
+                }
             )
 
     def parse_detail(self, response: Response):
