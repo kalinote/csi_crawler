@@ -10,16 +10,18 @@ class AnwangxiaSpider(BaseSpider):
     name = "anwangxia"
     allowed_domains = ["anwangxia.com"]
 
+    section_map = {
+        "独家报道": "exclusive",
+    }
+
     def default_start(self, response):
-        url = "https://www.anwangxia.com/category/exclusive/page/1"
-        yield scrapy.Request(
-            url,
-            callback=self.parse_post_list,
-            meta={
-                "current_page": 1,
-                "section": "独家报道"
-            }
-        )
+        for section in self.sections:
+            section_url = self.section_map.get(section)
+            if not section_url:
+                self.logger.error(f"未知采集板块: {section}")
+                continue
+            url = f"https://www.anwangxia.com/category/{section_url}/page/1"
+            yield scrapy.Request(url, callback=self.parse_post_list, meta={"current_page": 1, "section": section})
     
     def search_start(self, response):
         for keyword in self.keywords:
@@ -36,6 +38,7 @@ class AnwangxiaSpider(BaseSpider):
             )
 
     def parse_post_list(self, response: Response):
+        section = response.meta.get("section", "")
         urls = response.xpath("//h2/a/@href").getall()
 
         for url in urls:

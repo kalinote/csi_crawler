@@ -9,10 +9,19 @@ from csi_crawlers.utils import find_datetime_from_str, generate_uuid, safe_int
 class BearblogSpider(BaseSpider):
     name = "bearblog"
     allowed_domains = ["bearblog.dev"]
+    
+    section_map = {
+        "发现": "discover",
+    }
 
     def default_start(self, response):
-        url = "https://bearblog.dev/discover/?page=0"
-        yield scrapy.Request(url, callback=self.parse_post_list, meta={"current_page": 0, "section": "discover"})
+        for section in self.sections:
+            section_url = self.section_map.get(section)
+            if not section_url:
+                self.logger.error(f"未知采集板块: {section}")
+                continue
+            url = f"https://bearblog.dev/{section_url}/?page=0"
+            yield scrapy.Request(url, callback=self.parse_post_list, meta={"current_page": 0, "section": section})
 
     def parse_post_list(self, response: Response):
         current_page = response.meta.get("current_page", 0)
