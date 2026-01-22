@@ -38,7 +38,6 @@ class AnwangxiaSpider(BaseSpider):
             )
 
     def parse_post_list(self, response: Response):
-        section = response.meta.get("section", "")
         urls = response.xpath("//h2/a/@href").getall()
 
         for url in urls:
