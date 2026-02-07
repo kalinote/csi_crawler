@@ -34,7 +34,7 @@ class RabbitMQPipeline:
 
     @classmethod
     def from_crawler(cls, crawler):
-        return cls(
+        instance = cls(
             rabbitmq_host=crawler.settings.get('RABBITMQ_HOST', 'localhost'),
             rabbitmq_port=crawler.settings.get('RABBITMQ_PORT', 5672),
             rabbitmq_user=crawler.settings.get('RABBITMQ_USER', 'guest'),
@@ -44,6 +44,8 @@ class RabbitMQPipeline:
             rabbitmq_routing_key=crawler.settings.get('RABBITMQ_ROUTING_KEY', 'scrapy_items'),
             rabbitmq_queue=crawler.settings.get('RABBITMQ_QUEUE', 'scrapy_items')
         )
+        instance.crawler = crawler
+        return instance
 
     def _connect_rabbitmq(self):
         """创建或重新创建RabbitMQ连接"""
@@ -98,7 +100,8 @@ class RabbitMQPipeline:
                 self.spider.logger.warning('检测到channel已关闭，正在重新创建...')
             self._connect_rabbitmq()
 
-    def open_spider(self, spider):
+    def open_spider(self):
+        spider = self.crawler.spider
         self.spider = spider
         custom_queue = getattr(spider, 'rabbitmq_queue', None)
         if custom_queue:
@@ -113,11 +116,11 @@ class RabbitMQPipeline:
         
         self._connect_rabbitmq()
 
-    def close_spider(self, spider):
+    def close_spider(self):
         if self.connection and not self.connection.is_closed:
             self.connection.close()
 
-    def process_item(self, item, spider):
+    def process_item(self, item):
         adapter = ItemAdapter(item)
         item_dict = dict(adapter)
         
@@ -152,14 +155,14 @@ class RabbitMQPipeline:
                     pika.exceptions.ChannelClosedByBroker,
                     pika.exceptions.ConnectionClosedByBroker,
                     pika.exceptions.AMQPConnectionError) as e:
-                spider.logger.warning(f'发送消息到 RabbitMQ 失败 (尝试 {attempt + 1}/{max_retries}): {e}')
+                self.spider.logger.warning(f'发送消息到 RabbitMQ 失败 (尝试 {attempt + 1}/{max_retries}): {e}')
                 if attempt < max_retries - 1:
                     self._connect_rabbitmq()
                 else:
-                    spider.logger.error(f'发送消息到 RabbitMQ 失败，已重试{max_retries}次')
+                    self.spider.logger.error(f'发送消息到 RabbitMQ 失败，已重试{max_retries}次')
                     raise
             except Exception as e:
-                spider.logger.error(f'发送消息到 RabbitMQ 时发生未知错误: {e}')
+                self.spider.logger.error(f'发送消息到 RabbitMQ 时发生未知错误: {e}')
                 raise
         
         return item
