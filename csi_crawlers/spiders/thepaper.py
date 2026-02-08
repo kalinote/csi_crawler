@@ -18,10 +18,14 @@ class ThepaperSpider(BaseSpider):
     section_map = {
         "要闻": "",
     }
+    default_section = ""
 
     def default_start(self, response):
         for section in self.sections:
-            channel_id = self.section_map.get(section)
+            if section == "__default__":
+                channel_id = self.default_section
+            else:
+                channel_id = self.section_map.get(section, self.default_section)
             if not channel_id:
                 self.logger.error(f"未知采集板块: {section}")
                 continue
@@ -105,7 +109,7 @@ class ThepaperSpider(BaseSpider):
     
     def parse_default_list(self, response: JsonResponse):
         section = response.meta.get("section", "")
-        channel_id = self.section_map.get(section)
+        channel_id = self.section_map.get(section, "")
         if not channel_id:
             self.logger.error(f"未知采集板块: {section}")
             return

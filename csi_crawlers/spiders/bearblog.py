@@ -13,10 +13,14 @@ class BearblogSpider(BaseSpider):
     section_map = {
         "发现": "discover",
     }
-
+    default_section = "discover"
+    
     def default_start(self, response):
         for section in self.sections:
-            section_url = self.section_map.get(section)
+            if section == "__default__":
+                section_url = self.default_section
+            else:
+                section_url = self.section_map.get(section, self.default_section)
             if not section_url:
                 self.logger.error(f"未知采集板块: {section}")
                 continue

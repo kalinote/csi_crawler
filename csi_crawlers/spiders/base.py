@@ -78,11 +78,12 @@ class BaseSpider(scrapy.Spider):
         
         if self.crawler_type == 'default':
             if not sections:
-                raise ValueError('未知采集板块')
-            self.sections = sections
+                self.sections = ["__default__"]
+            else:
+                self.sections = sections
             self.logger.info(f'采集板块: {self.sections}')
         else:
-            self.sections = None
+            self.sections = ["__default__"]
             
     async def start(self):
         if self.crawler_type == 'default':

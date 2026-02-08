@@ -20,6 +20,7 @@ class JavbusSpider(BaseSpider):
     section_map = {
         "老司机福利讨论区": 2,
     }
+    default_section = 2
 
     def search_start(self, response: HtmlResponse):
         yield scrapy.Request(
@@ -100,7 +101,10 @@ class JavbusSpider(BaseSpider):
 
     def default_start(self, response: HtmlResponse):
         for section in self.sections:
-            fid = self.section_map.get(section)
+            if section == "__default__":
+                fid = self.default_section
+            else:
+                fid = self.section_map.get(section, self.default_section)
             if not fid:
                 self.logger.error(f"未知采集板块: {section}")
                 continue
