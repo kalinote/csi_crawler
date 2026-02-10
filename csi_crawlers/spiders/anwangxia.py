@@ -13,14 +13,13 @@ class AnwangxiaSpider(BaseSpider):
     section_map = {
         "独家报道": "exclusive",
     }
-    default_section = "exclusive"
 
     def default_start(self, response):
         for section in self.sections:
             if section == "__default__":
-                section_url = self.default_section
-            else:
-                section_url = self.section_map.get(section, self.default_section)
+                section = "独家报道"
+
+            section_url = self.section_map.get(section)
             if not section_url:
                 self.logger.error(f"未知采集板块: {section}")
                 continue
