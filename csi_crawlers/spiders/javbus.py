@@ -157,6 +157,7 @@ class JavbusSpider(BaseSpider):
                     callback=self.parse_forum,
                     meta={
                         "current_page": current_page + 1,
+                        "section": section,
                         "download_delay": 5
                     },
                     dont_filter=True
