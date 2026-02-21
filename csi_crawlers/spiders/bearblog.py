@@ -70,6 +70,7 @@ class BearblogSpider(BaseSpider):
             self.logger.info(f"已到达最后一页，当前第 {current_page} 页")
 
     def search_start(self, response):
+        raise Exception("关键词搜索暂时无法使用，等待cookie管理功能完成")
         self.logger.info(f"开始关键词搜索，关键词数量: {len(self.keywords)}")
         # 获取搜索页以提取 CSRF token
         yield scrapy.Request(

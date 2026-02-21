@@ -5,13 +5,9 @@
     },
     "config": {
         "page": 2,
-        "crawler_type": "keyword"
+        "crawler_type": "default"
     },
     "inputs": {
-        "keywords": {
-            "type": "value",
-            "value": ["mine", "craft"]
-        },
         "platforms": {
             "type": "value",
             "value": ["bearblog"]
