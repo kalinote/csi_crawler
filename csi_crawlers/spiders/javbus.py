@@ -315,6 +315,12 @@ class JavbusSpider(BaseSpider):
             
             comment_item = self._init_base_item(response, tid, section)
             
+            raw_floor = post_box.xpath(".//strong/a/em/text()").get()
+            if not raw_floor:
+                raw_floor = post_box.xpath(".//strong/a/text()").get()
+                if raw_floor and str(raw_floor.strip()) == "樓主":
+                    raw_floor = 2
+            
             comment_item.update({
                 "uuid": generate_uuid("forum" + comment_source_id + str(comment_last_edit_at) + comment_raw_content),
                 "source_id": comment_source_id,
@@ -323,7 +329,7 @@ class JavbusSpider(BaseSpider):
                 "author_id": extract_param_from_url(post_box.xpath('.//div[@class="authi"]/a/@href').get(), "uid"),
                 "author_name": post_box.xpath('.//div[@class="authi"]/a/text()').get() or "",
                 "parent_id": source_id or tid,
-                "floor": safe_int(post_box.xpath(".//strong/a/em/text()").get()) or -1,
+                "floor": safe_int(raw_floor) or -1,
                 "thread_type": "comment",
                 "category_tag": common_data['category_tag'],
                 "title": common_data['title'],

@@ -72,7 +72,7 @@ def safe_int(text: str) -> int:
     """
     try:
         number = int(text)
-    except ValueError:
+    except Exception:
         return None
     return number
 
