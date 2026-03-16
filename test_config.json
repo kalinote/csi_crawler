@@ -10,7 +10,7 @@
     "inputs": {
         "platforms": {
             "type": "value",
-            "value": ["bearblog"]
+            "value": ["wforum"]
         }
     },
     "outputs": {
