@@ -22,13 +22,6 @@ class WForumNewsSpider(BaseSpider):
         "中国军情": {"path": "china"},
     }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if isinstance(self.sections, str):
-            parts = [s.strip() for s in self.sections.split(",") if s.strip()]
-            if parts:
-                self.sections = parts
-
     def default_start(self, response):
         for section in self.sections:
             if section == "__default__":
@@ -187,9 +180,6 @@ class WForumNewsSpider(BaseSpider):
             publish_at = list_time.replace("　", " ")
 
         raw_content_html = response.xpath("//div[@id='cont']").get() or ""
-        clean_content = "".join(
-            response.xpath("//div[@id='cont']//text()").getall()
-        ).strip()
         cover_image = response.xpath(
             "(//div[@id='cont']//img[1]/@src)[1]"
         ).get()
@@ -218,9 +208,7 @@ class WForumNewsSpider(BaseSpider):
         item["nsfw"] = False
         item["aigc"] = False
         item["title"] = title
-        item["clean_content"] = clean_content
         item["raw_content"] = raw_content_html
-        item["safe_raw_content"] = None
         item["cover_image"] = cover_image
         item["likes"] = -1
 

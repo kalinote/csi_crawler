@@ -4,13 +4,13 @@
         "action_id": "694251b96d9534925bd9f6f3"
     },
     "config": {
-        "page": 2,
+        "page": 5,
         "crawler_type": "default"
     },
     "inputs": {
         "platforms": {
             "type": "value",
-            "value": ["wforum"]
+            "value": ["ifeng_news"]
         }
     },
     "outputs": {

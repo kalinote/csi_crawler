@@ -80,7 +80,7 @@ class BaseSpider(scrapy.Spider):
             if not sections:
                 self.sections = ["__default__"]
             else:
-                self.sections = sections
+                self.sections = [s.strip() for s in sections.split(",") if s.strip()]
             self.logger.info(f'采集板块: {self.sections}')
         else:
             self.sections = ["__default__"]
