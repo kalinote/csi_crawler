@@ -3,6 +3,7 @@
 import datetime
 import json
 import re
+from datetime import timezone, timedelta
 from urllib.parse import quote, urlparse
 
 import scrapy
@@ -30,6 +31,7 @@ class IfengNewsSpider(BaseSpider):
         "home.ifeng.com",
         "ishare.ifeng.com",
         "d.shankapi.ifeng.com",
+        "shankapi.ifeng.com",
     ]
 
     section_map = {
@@ -130,6 +132,7 @@ class IfengNewsSpider(BaseSpider):
 
     def parse_default_list(self, response: Response):
         section = response.meta.get("section", "")
+        current_page = response.meta.get("current_page", 1)
         seen_urls = set()
         list_xpath = (
             "//p[contains(@class,'index_news_list_p_')]//a[contains(@href,'/c/')] "
@@ -158,6 +161,103 @@ class IfengNewsSpider(BaseSpider):
                 callback=self.parse_detail,
                 meta={"section": section},
             )
+
+        should_paginate = (self.page is None or self.page <= 0) or current_page < self.page
+        if not should_paginate:
+            return
+
+        all_data = self._extract_list_alldata(response)
+        if not all_data:
+            return
+        newsstream = all_data.get("newsstream") or []
+        stream_key = (all_data.get("newsStream") or {}).get("key") or ""
+        if not newsstream or not stream_key:
+            return
+        last_item = newsstream[-1]
+        last_id = last_item.get("id") or ""
+        last_news_time = last_item.get("newsTime") or ""
+        if not last_id or not last_news_time:
+            return
+        last_ts_ms = self._news_time_to_ms(last_news_time)
+        if last_ts_ms is None:
+            return
+        yield from self._make_default_api_request(section, stream_key, last_id, last_ts_ms, current_page + 1)
+
+    def _extract_list_alldata(self, response: Response):
+        m = re.search(r"var\s+allData\s*=\s*(\{[\s\S]*?\});?\s*var\s+", response.text)
+        if not m:
+            return None
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            return None
+
+    def _news_time_to_ms(self, news_time: str):
+        try:
+            CST = timezone(timedelta(hours=8))
+            dt = datetime.datetime.strptime(news_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CST)
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            return None
+
+    def _make_default_api_request(self, section: str, stream_key: str, last_id: str, last_ts_ms: int, current_page: int):
+        url = (
+            f"https://shankapi.ifeng.com/api/_/getColumnInfo/_/dynamicFragment"
+            f"/{last_id}/{last_ts_ms}/30/{stream_key}"
+        )
+        yield scrapy.Request(
+            url=url,
+            callback=self.parse_default_api,
+            meta={
+                "section": section,
+                "stream_key": stream_key,
+                "current_page": current_page,
+            },
+        )
+
+    def parse_default_api(self, response: Response):
+        section = response.meta.get("section", "")
+        stream_key = response.meta.get("stream_key", "")
+        current_page = response.meta.get("current_page", 2)
+
+        try:
+            data = json.loads(response.text)
+        except Exception as e:
+            self.logger.warning(f"默认列表翻页 API 解析失败（第{current_page}页）: {e}")
+            return
+
+        result = data.get("data") or {}
+        is_end = result.get("isEnd", True)
+        newsstream = result.get("newsstream") or []
+
+        for item_data in newsstream:
+            raw_url = item_data.get("url") or ""
+            if not raw_url:
+                continue
+            if raw_url.startswith("//"):
+                raw_url = "https:" + raw_url
+            if "v.ifeng.com" in raw_url or "/c/special/" in raw_url:
+                continue
+            yield scrapy.Request(
+                url=raw_url,
+                callback=self.parse_detail,
+                meta={"section": section},
+            )
+
+        if is_end:
+            return
+        should_paginate = (self.page is None or self.page <= 0) or current_page < self.page
+        if not should_paginate or not newsstream:
+            return
+        last_item = newsstream[-1]
+        last_id = last_item.get("id") or ""
+        last_news_time = last_item.get("newsTime") or ""
+        if not last_id or not last_news_time:
+            return
+        last_ts_ms = self._news_time_to_ms(last_news_time)
+        if last_ts_ms is None:
+            return
+        yield from self._make_default_api_request(section, stream_key, last_id, last_ts_ms, current_page + 1)
 
     def parse_detail(self, response: Response):
         section = response.meta.get("section", "")
