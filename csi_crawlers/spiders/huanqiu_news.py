@@ -1,5 +1,6 @@
 # NOTICE: 该爬虫完全由AI生成，需要持续观察。
 
+import base64
 import datetime
 import re
 from typing import Optional
@@ -33,6 +34,8 @@ class HuanqiuNewsSpider(BaseSpider):
         "house.huanqiu.com",
         "city.huanqiu.com",
         "yrd.huanqiu.com",
+        "img.huanqiucdn.cn",
+        "rfp.huanqiucdn.cn",
     ]
 
     section_map = {
@@ -74,32 +77,27 @@ class HuanqiuNewsSpider(BaseSpider):
     def default_start(self, response):
         for section in self._normalize_sections(self.sections):
             if section == "__default__":
-                for default_section in self.section_map.keys():
-                    yield from self._make_section_request(default_section, 1)
-                continue
+                section = "国内"
 
             if section not in self.section_map:
                 self.logger.error(f"未知采集板块: {section}")
                 continue
 
-            yield from self._make_section_request(section, 1)
+            section_url = self.section_map.get(section)
+            if not section_url:
+                return
+            yield scrapy.Request(
+                url=urljoin(section_url, "api/channel_pc"),
+                callback=self.parse_channel_config,
+                meta={
+                    "current_page": 1,
+                    "section": section,
+                    "section_url": section_url,
+                },
+            )
 
     def search_start(self, response):
         raise NotImplementedError("环球网暂不支持关键词搜索采集（crawler_type=keyword）")
-
-    def _make_section_request(self, section: str, page: int):
-        section_url = self.section_map.get(section)
-        if not section_url:
-            return
-        yield scrapy.Request(
-            url=urljoin(section_url, "api/channel_pc"),
-            callback=self.parse_channel_config,
-            meta={
-                "current_page": page,
-                "section": section,
-                "section_url": section_url,
-            },
-        )
 
     def parse_channel_config(self, response: Response):
         section = response.meta.get("section", "")
@@ -156,7 +154,6 @@ class HuanqiuNewsSpider(BaseSpider):
             title = (it.get("title") or "").strip()
             addltype = (it.get("addltype") or "").strip()
             host = (it.get("host") or "").strip()
-            cover = (it.get("cover") or "").strip()
             xtime = (it.get("xtime") or it.get("ctime") or "").strip()
 
             if not aid:
@@ -178,7 +175,6 @@ class HuanqiuNewsSpider(BaseSpider):
                     "section": section,
                     "source_id": aid,
                     "list_title": title,
-                    "cover_image": cover,
                     "publish_ts": xtime,
                 },
             )
@@ -240,11 +236,6 @@ class HuanqiuNewsSpider(BaseSpider):
         if not author_name:
             author_name = "未知"
 
-        cover_image = (response.meta.get("cover_image") or "").strip()
-        if not cover_image:
-            cover_image = self._extract_first_image(raw_content)
-        cover_image = response.urljoin(cover_image) if cover_image else cover_image
-
         uuid = generate_uuid("article" + source_id + str(last_edit_at) + raw_content)
 
         item = CSIArticlesItem()
@@ -266,10 +257,82 @@ class HuanqiuNewsSpider(BaseSpider):
         item["aigc"] = False
         item["title"] = title
         item["raw_content"] = raw_content
-        item["cover_image"] = cover_image
         item["likes"] = -1
 
-        yield item
+        img_urls = self._extract_all_image_urls(raw_content)
+        poster_urls = self._extract_all_video_poster_urls(raw_content)
+        media_urls = img_urls + poster_urls
+        seen_media: set[str] = set()
+        media_urls = [u for u in media_urls if not (u in seen_media or seen_media.add(u))]
+
+        if not media_urls:
+            yield item
+            return
+
+        pending = {
+            "count": len(media_urls),
+            "done": 0,
+            "base64_map": {},
+            "raw_content": raw_content,
+            "item": item,
+        }
+        for media_url in media_urls:
+            if isinstance(media_url, str) and media_url.strip().lower().startswith("data:"):
+                pending["done"] += 1
+                continue
+
+            abs_url = urljoin(response.url, media_url)
+            yield scrapy.Request(
+                url=abs_url,
+                callback=self.parse_image,
+                errback=self.handle_image_error,
+                meta={
+                    "pending": pending,
+                    "img_url": media_url,
+                    "expect_image_only": media_url in poster_urls,
+                },
+                headers={"Referer": response.url},
+                dont_filter=True,
+            )
+
+    def parse_image(self, response):
+        pending = response.meta["pending"]
+        img_url = response.meta["img_url"]
+        expect_image_only = bool(response.meta.get("expect_image_only"))
+
+        content_type = response.headers.get("Content-Type", b"image/jpeg").decode().split(";")[0].strip()
+        if not content_type.startswith("image/"):
+            if expect_image_only:
+                pending["done"] += 1
+                if pending["done"] >= pending["count"]:
+                    pending["item"]["raw_content"] = self._replace_images_with_base64(
+                        pending["raw_content"], pending["base64_map"]
+                    )
+                    yield pending["item"]
+                return
+            content_type = "image/jpeg"
+
+        img_b64 = base64.b64encode(response.body).decode()
+        pending["base64_map"][img_url] = f"data:{content_type};base64,{img_b64}"
+
+        pending["done"] += 1
+        if pending["done"] >= pending["count"]:
+            pending["item"]["raw_content"] = self._replace_images_with_base64(
+                pending["raw_content"], pending["base64_map"]
+            )
+            yield pending["item"]
+
+    def handle_image_error(self, failure):
+        request = failure.request
+        pending = request.meta["pending"]
+        self.logger.warning(f"图片下载失败，保留原始链接: {request.url}")
+
+        pending["done"] += 1
+        if pending["done"] >= pending["count"]:
+            pending["item"]["raw_content"] = self._replace_images_with_base64(
+                pending["raw_content"], pending["base64_map"]
+            )
+            yield pending["item"]
 
     @staticmethod
     def _strip_html(html: str) -> str:
@@ -380,4 +443,83 @@ class HuanqiuNewsSpider(BaseSpider):
             ]
         )
         return f"https://{host}/api/list?node={node_param}&offset={offset}&limit={limit}"
+
+    @staticmethod
+    def _extract_all_image_urls(html: str) -> list[str]:
+        if not html:
+            return []
+        urls: list[str] = []
+
+        # 1) src
+        urls.extend(re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE))
+
+        # 2) data-src / data-original / data-lazy 等常见懒加载属性
+        urls.extend(
+            re.findall(r'<img[^>]+data-src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        )
+        urls.extend(
+            re.findall(r'<img[^>]+data-original=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        )
+        urls.extend(
+            re.findall(r'<img[^>]+data-lazy=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        )
+
+        # 3) srcset：取第一条 URL（逗号分隔，每条可能带宽度/倍率描述）
+        for srcset in re.findall(r'<img[^>]+srcset=["\']([^"\']+)["\']', html, re.IGNORECASE):
+            first = (srcset or "").split(",")[0].strip()
+            if not first:
+                continue
+            first_url = first.split()[0].strip()
+            if first_url:
+                urls.append(first_url)
+
+        seen: set[str] = set()
+        result: list[str] = []
+        for url in urls:
+            if url not in seen:
+                seen.add(url)
+                result.append(url)
+        return result
+
+    @staticmethod
+    def _extract_all_video_poster_urls(html: str) -> list[str]:
+        if not html:
+            return []
+        posters = re.findall(r"<video[^>]+poster=[\"']([^\"']+)[\"']", html, re.IGNORECASE)
+        seen: set[str] = set()
+        result: list[str] = []
+        for u in posters:
+            if not u or u in seen:
+                continue
+            seen.add(u)
+            result.append(u)
+        return result
+
+    @staticmethod
+    def _replace_images_with_base64(html: str, base64_map: dict) -> str:
+        for url, data_uri in base64_map.items():
+            # src / data-src / data-original / data-lazy
+            html = html.replace(f'src="{url}"', f'src="{data_uri}"')
+            html = html.replace(f"src='{url}'", f"src='{data_uri}'")
+            html = html.replace(f'data-src="{url}"', f'data-src="{data_uri}"')
+            html = html.replace(f"data-src='{url}'", f"data-src='{data_uri}'")
+            html = html.replace(f'data-original="{url}"', f'data-original="{data_uri}"')
+            html = html.replace(f"data-original='{url}'", f"data-original='{data_uri}'")
+            html = html.replace(f'data-lazy="{url}"', f'data-lazy="{data_uri}"')
+            html = html.replace(f"data-lazy='{url}'", f"data-lazy='{data_uri}'")
+            html = html.replace(f'poster="{url}"', f'poster="{data_uri}"')
+            html = html.replace(f"poster='{url}'", f"poster='{data_uri}'")
+
+            # srcset：只替换 srcset 属性值里的 URL token（保持原有描述符不动，避免误替换其它文本）
+            def _srcset_repl(m: re.Match) -> str:
+                attr = m.group(1)
+                quote = m.group(2)
+                val = m.group(3)
+                escaped_url = re.escape(url)
+                # 替换形如：<url><空格/逗号/结束> 的 URL token
+                val = re.sub(rf"(?<!\S){escaped_url}(?=(\s|,|$))", data_uri, val)
+                return f"{attr}={quote}{val}{quote}"
+
+            html = re.sub(r"(srcset)\s*=\s*([\"'])(.*?)\2", _srcset_repl, html, flags=re.IGNORECASE | re.DOTALL)
+        return html
 
