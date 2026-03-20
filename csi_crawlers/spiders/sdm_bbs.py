@@ -46,9 +46,15 @@ class ThreeDMForumSpider(BaseSpider):
 
     def default_start(self, response):
         """根据板块配置发起各板块列表页请求。"""
+        if "__default__" in self.sections:
+            self.sections.remove("__default__")
+            if "游戏杂谈区" not in self.sections:
+                self.sections.append("游戏杂谈区")
+            if "PC新游发布与体验区" not in self.sections:
+                self.sections.append("PC新游发布与体验区")
         for section in self.sections:
             if section == "__default__":
-                section = "PC新游发布与体验区"
+                continue
             conf = self.section_config.get(section)
             if not conf:
                 self.logger.error(f"未知采集板块: {section}")
@@ -253,12 +259,19 @@ class ThreeDMForumSpider(BaseSpider):
         raw_content_html = post_node.xpath(".//td[contains(@class,'t_f')]").get() or ""
 
         floor_text = post_node.xpath(
-            "normalize-space(.//div[contains(@class,'pi')]//strong[1]/a[1]/text())"
+            "normalize-space(.//td[@class='plc']/div[@class='pi']/strong)"
         ).get()
         floor = -1
         if floor_text:
-            floor_text = floor_text.replace("#", "").strip()
-            floor = safe_int(floor_text)
+            if floor_text == "舒服的沙发":
+                floor = 2
+            elif floor_text == "硬硬的板凳":
+                floor = 3
+            elif floor_text == "冰凉的地板":
+                floor = 4
+            else:
+                floor_text = floor_text.replace("#", "").strip()
+                floor = safe_int(floor_text)
         if thread_type == "thread":
             floor = 1
 
