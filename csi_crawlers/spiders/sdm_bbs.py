@@ -226,6 +226,9 @@ class ThreeDMForumSpider(BaseSpider):
         pid_attr = post_node.xpath("@id").get()
         if not pid_attr:
             return None
+
+        if self._is_locked_visible_to_author_only(post_node):
+            return None
         source_id = pid_attr.split("post_")[-1]
 
         author_name = post_node.xpath(
@@ -327,6 +330,19 @@ class ThreeDMForumSpider(BaseSpider):
 
         return item
 
+    def _is_locked_visible_to_author_only(self, node) -> bool:
+        """是否为“仅作者可见”的隐藏内容楼层。"""
+        locked_text = node.xpath(
+            "normalize-space(.//div[contains(@class,'locked')][1])"
+        ).get()
+        if locked_text and "此帖仅作者可见" in locked_text:
+            return True
+
+        locked_html = node.xpath(
+            ".//div[contains(@class,'locked') and contains(., '此帖仅作者可见')][1]"
+        ).get()
+        return bool(locked_html)
+
     def _parse_featured_comments(
         self,
         response: Response,
@@ -347,6 +363,8 @@ class ThreeDMForumSpider(BaseSpider):
         )
         index = 0
         for node in featured_nodes:
+            if self._is_locked_visible_to_author_only(node):
+                continue
             index += 1
             cid_attr = node.xpath("@id").get()
             if cid_attr and "comment_" in cid_attr:
