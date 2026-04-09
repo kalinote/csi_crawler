@@ -1,6 +1,7 @@
 import sys
 import os
 import argparse
+import json
 
 # 将项目根目录加入 python 搜索路径并设置 settings 模块
 root_dir = os.path.dirname(os.path.abspath(__file__))
@@ -103,6 +104,16 @@ class SpiderMonitor:
         return "所有爬虫都失败了。错误信息: " + "; ".join(errors)
 
 
+def extract_resources_config(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """提取平台专属配置，整体可选，不存在或为 null 时返回空 dict。"""
+    data = inputs.get('resources_config')
+    if not data:
+        return {}
+    if isinstance(data, dict) and data.get('type') == 'value':
+        return data.get('value') or {}
+    return {}
+
+
 def extract_platforms(inputs: Dict[str, Any]) -> List[str]:
     platforms_data = inputs.get('platforms')
     
@@ -139,7 +150,7 @@ def parse_spider_args(config: Dict[str, Any], inputs: Dict[str, Any], outputs: D
             args[key] = str(value)
     
     for key, input_data in inputs.items():
-        if key == 'platforms':
+        if key in ('platforms', 'resources_config'):
             continue
         
         if isinstance(input_data, dict) and input_data.get('type') == 'value':
@@ -182,6 +193,9 @@ def main():
             return
         
         logger.info(f"将要运行的爬虫: {platforms}")
+        
+        resources_config = extract_resources_config(inputs)
+        logger.info(f"资源配置: {resources_config}")
         
         spider_args = parse_spider_args(config, inputs, outputs)
         logger.info(f"解析的爬虫参数: {spider_args}")
@@ -231,8 +245,26 @@ def main():
                 crawler.signals.connect(monitor.on_spider_closed, signal=signals.spider_closed)
                 crawler.signals.connect(monitor.on_item_scraped, signal=signals.item_scraped)
                 crawler.signals.connect(monitor.on_spider_error, signal=signals.spider_error)
-                
-                process.crawl(crawler, **spider_args) 
+
+                per = resources_config.get(spider_name, {})
+                merged = {**spider_args}
+
+                # 解析资源配置
+                if per.get('sections'):
+                    secs = per['sections']
+                    merged['sections'] = ','.join(secs) if isinstance(secs, list) else str(secs)
+
+                if per.get('proxy') is not None:
+                    merged['proxy_url'] = per['proxy'] or ''
+
+                if per.get('headers'):
+                    merged['platform_headers'] = json.dumps(per['headers'], ensure_ascii=False)
+
+                if per.get('cookies') is not None:
+                    val = per['cookies']
+                    merged['platform_cookies'] = json.dumps(val) if isinstance(val, dict) else (val or '')
+
+                process.crawl(crawler, **merged)
                 
                 logger.info(f"爬虫 {spider_name} 已加入执行队列")
             except KeyError as e:

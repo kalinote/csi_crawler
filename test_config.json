@@ -11,6 +11,19 @@
         "platforms": {
             "type": "value",
             "value": ["nytimes_cn_news"]
+        },
+        "resources_config": {
+            "type": "value",
+            "value": {
+                "nytimes_cn_news": {
+                    "sections": ["中国", "国际"],
+                    "proxy": "http://192.168.31.200:7890",
+                    "headers": {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+                    },
+                    "cookies": null
+                }
+            }
         }
     },
     "outputs": {

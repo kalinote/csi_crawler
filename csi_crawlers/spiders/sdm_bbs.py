@@ -15,12 +15,6 @@ class ThreeDMForumSpider(BaseSpider):
     name = "sdm_bbs"
     allowed_domains = ["bbs.3dmgame.com"]
 
-    custom_settings = {
-        "DOWNLOADER_MIDDLEWARES": {
-            "csi_crawlers.middlewares.ProxyMiddleware": None,
-        }
-    }
-
     section_config = {
         "PC新游发布与体验区": {
             "start_url": "https://bbs.3dmgame.com/game0day",

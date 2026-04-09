@@ -1,3 +1,4 @@
+import json
 import scrapy
 
 
@@ -16,8 +17,26 @@ class BaseSpider(scrapy.Spider):
     # start_url 适用于某些需要先去指定页面获取token类信息的情况
     start_url = None
     
-    def __init__(self, rabbitmq_queue=None, page=None, start_time=None, end_time=None, keywords=None, crawler_type=None, sections=None, *args, **kwargs):
+    def __init__(self, rabbitmq_queue=None, page=None, start_time=None, end_time=None, keywords=None, crawler_type=None, sections=None, proxy_url=None, platform_headers=None, platform_cookies=None, *args, **kwargs):
         super(BaseSpider, self).__init__(*args, **kwargs)
+
+        self.proxy_url = proxy_url if proxy_url else None
+
+        if platform_headers:
+            try:
+                self.platform_headers = json.loads(platform_headers)
+            except (json.JSONDecodeError, TypeError):
+                self.platform_headers = {}
+        else:
+            self.platform_headers = {}
+
+        if platform_cookies:
+            try:
+                self.platform_cookies = json.loads(platform_cookies)
+            except (json.JSONDecodeError, TypeError):
+                self.platform_cookies = platform_cookies
+        else:
+            self.platform_cookies = None
         
         if rabbitmq_queue:
             self.rabbitmq_queue = rabbitmq_queue

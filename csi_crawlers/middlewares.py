@@ -67,8 +67,10 @@ class CsiCrawlersDownloaderMiddleware:
         return s
 
     async def process_request(self, request, spider):
-        # 暂时设置固定代理
-        request.meta['proxy'] = 'http://192.168.31.200:7890'
+        if 'proxy' not in request.meta:
+            proxy_url = getattr(spider, 'proxy_url', None)
+            if proxy_url:
+                request.meta['proxy'] = proxy_url
 
         if 'download_delay' in request.meta and request.meta['download_delay'] > 0:
             delay = request.meta['download_delay']
