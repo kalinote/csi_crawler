@@ -1,6 +1,5 @@
 import sys
 import os
-import argparse
 import json
 
 # 将项目根目录加入 python 搜索路径并设置 settings 模块
@@ -8,30 +7,30 @@ root_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, root_dir)
 os.environ.setdefault('SCRAPY_SETTINGS_MODULE', 'csi_crawlers.settings')
 
-from csi_base_component_sdk import BaseComponent
+from csi_base_component_sdk import ComponentContext, ComponentFailure
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 from scrapy import signals
 import logging
-from typing import Dict, List, Any, Optional
+from twisted.internet.task import LoopingCall
+from typing import Any, Dict, List
 
 logging.basicConfig(
     level=logging.INFO,
-    format='[%(asctime)s] [%(levelname)s] [LAUNCHER] %(message)s',
+    format='[%(asctime)s] [%(levelname)s] [CSI_CRAWLER] %(message)s',
     datefmt='%H:%M:%S'
 )
-logger = logging.getLogger("LAUNCHER")
+logger = logging.getLogger("csi_crawler")
 
 
 class SpiderMonitor:
-    def __init__(self, total_spiders: int, sdk_node: BaseComponent):
+    def __init__(self, total_spiders: int, ctx: ComponentContext):
         self.total_spiders = total_spiders
-        self.sdk_node = sdk_node
+        self.ctx = ctx
         self.spider_progress = {}
         self.spider_errors = {}
         self.spider_success = {}
         self.item_counts = {}
-        self.base_progress = 0
         
     def on_spider_opened(self, spider):
         spider_name = spider.name
@@ -72,7 +71,7 @@ class SpiderMonitor:
             return
         
         avg_progress = sum(self.spider_progress.values()) / self.total_spiders
-        self.sdk_node.report_progress(int(avg_progress), message)
+        self.ctx.report_progress(int(avg_progress), message)
     
     def record_startup_error(self, spider_name: str, error: str):
         self.spider_errors[spider_name] = error
@@ -144,6 +143,9 @@ def parse_spider_args(config: Dict[str, Any], inputs: Dict[str, Any], outputs: D
     args = {}
     
     for key, value in config.items():
+        # output 是 Runner 本地文件导出配置，不应作为爬虫参数下发。
+        if key == 'output':
+            continue
         if isinstance(value, list):
             args[key] = ','.join(str(v) for v in value)
         else:
@@ -160,147 +162,148 @@ def parse_spider_args(config: Dict[str, Any], inputs: Dict[str, Any], outputs: D
             else:
                 args[key] = str(value)
         
-    for key, output in outputs.items():
-        queues = []
+    queues = []
+    for output in outputs.values():
         if isinstance(output, dict) and output.get('type') == 'reference':
             value = output.get('value', [])
             if isinstance(value, list):
                 queues.extend(value)
             else:
                 queues.append(str(value))
-        
-        if queues:
-            args['rabbitmq_queue'] = ','.join(queues)
+
+    if queues:
+        args['rabbitmq_queue'] = ','.join(queues)
     
     return args
 
 
-def main():
-    with BaseComponent() as node:
-        logger.info("启动 Scrapy 爬虫调度器")
-        
-        config = node.config
-        inputs = node.inputs
-        outputs = node.outputs
-        
-        logger.info(f"接收到配置: config={config}")
-        logger.info(f"接收到输入: inputs={inputs}")
-        logger.info(f"接收到输出: outputs={outputs}")
-        
-        platforms = extract_platforms(inputs)
-        if not platforms:
-            node.fail("未能从配置中提取到有效的平台列表(platforms)")
-            return
-        
-        logger.info(f"将要运行的爬虫: {platforms}")
-        
-        resources_config = extract_resources_config(inputs)
-        logger.info(f"资源配置: {resources_config}")
-        
-        spider_args = parse_spider_args(config, inputs, outputs)
-        logger.info(f"解析的爬虫参数: {spider_args}")
-        
-        monitor = SpiderMonitor(len(platforms), node)
+def run(ctx: ComponentContext) -> Dict[str, Any]:
+    """根据运行上下文启动指定 Scrapy 爬虫并返回汇总结果。"""
+    ctx.logger.info("启动 Scrapy 爬虫调度器")
 
-        # 解析命令行参数
-        parser = argparse.ArgumentParser()
-        parser.add_argument('-o', '--output', help='输出结果到文件')
-        args, _ = parser.parse_known_args()
-        
-        settings = get_project_settings()
+    config = ctx.config
+    inputs = ctx.inputs
+    outputs = ctx.outputs
 
-        if args.output:
-            output_file = args.output
-            # Scrapy 的命令行工具是在参数解析阶段推断格式的，
-            # 在代码中直接设置 FEEDS 时必须显式指定 format，否则会报 KeyError
-            _, ext = os.path.splitext(output_file)
-            ext = ext.lower()
-            
-            # 简单的映射表
-            ext_map = {
-                '.jsonl': 'jsonlines',
-                '.csv': 'csv',
-                '.xml': 'xml',
-                '.json': 'json'
+    # 不记录完整值：resources_config 可能包含 cookie、代理认证和请求头。
+    ctx.logger.info(
+        "运行上下文已加载",
+        config_keys=sorted(config),
+        input_keys=sorted(inputs),
+        output_keys=sorted(outputs),
+    )
+
+    platforms = extract_platforms(inputs)
+    if not platforms:
+        raise ComponentFailure("未能从配置中提取到有效的平台列表(platforms)")
+
+    ctx.logger.info("爬虫列表解析完成", platforms=platforms, spider_count=len(platforms))
+
+    resources_config = extract_resources_config(inputs)
+    ctx.logger.info("平台资源配置已加载", configured_platforms=sorted(resources_config))
+
+    spider_args = parse_spider_args(config, inputs, outputs)
+    ctx.logger.info("爬虫参数解析完成", argument_keys=sorted(spider_args))
+
+    monitor = SpiderMonitor(len(platforms), ctx)
+    settings = get_project_settings()
+    output_file = ctx.get_config("output")
+
+    if output_file:
+        _, ext = os.path.splitext(str(output_file))
+        ext_map = {
+            '.jsonl': 'jsonlines',
+            '.csv': 'csv',
+            '.xml': 'xml',
+            '.json': 'json'
+        }
+        out_format = ext_map.get(ext.lower(), 'json')
+        settings.set('FEEDS', {
+            str(output_file): {
+                'format': out_format,
+                'encoding': 'utf8',
+                'indent': 4,
             }
-            # 默认为 json
-            out_format = ext_map.get(ext, 'json')
-            
-            settings.set('FEEDS', {
-                output_file: {
-                    'format': out_format,
-                    'encoding': 'utf8',
-                    'indent': 4,
-                }
-            }, priority='cmdline')
-            logger.info(f"已启用文件输出: {output_file} (格式: {out_format})")
-            
-        process = CrawlerProcess(settings)
-        
-        for spider_name in platforms:
-            try:
-                crawler = process.create_crawler(spider_name)
-                
-                crawler.signals.connect(monitor.on_spider_opened, signal=signals.spider_opened)
-                crawler.signals.connect(monitor.on_spider_closed, signal=signals.spider_closed)
-                crawler.signals.connect(monitor.on_item_scraped, signal=signals.item_scraped)
-                crawler.signals.connect(monitor.on_spider_error, signal=signals.spider_error)
+        }, priority='cmdline')
+        logger.info(f"已启用文件输出: {output_file} (格式: {out_format})")
 
-                per = resources_config.get(spider_name, {})
-                merged = {**spider_args}
+    process = CrawlerProcess(settings)
 
-                # 解析资源配置
-                if per.get('sections'):
-                    secs = per['sections']
-                    merged['sections'] = ','.join(secs) if isinstance(secs, list) else str(secs)
-
-                if per.get('proxy') is not None:
-                    merged['proxy_url'] = per['proxy'] or ''
-
-                if per.get('headers'):
-                    merged['platform_headers'] = json.dumps(per['headers'], ensure_ascii=False)
-
-                if per.get('cookies') is not None:
-                    val = per['cookies']
-                    merged['platform_cookies'] = json.dumps(val) if isinstance(val, dict) else (val or '')
-
-                process.crawl(crawler, **merged)
-                
-                logger.info(f"爬虫 {spider_name} 已加入执行队列")
-            except KeyError as e:
-                error_msg = f"爬虫不存在: {spider_name}"
-                monitor.record_startup_error(spider_name, error_msg)
-                logger.error(error_msg)
-            except Exception as e:
-                error_msg = f"启动失败: {str(e)}"
-                monitor.record_startup_error(spider_name, error_msg)
-                logger.error(f"爬虫 {spider_name} 启动异常: {error_msg}")
-        
-        if not process.crawlers:
-            node.fail("所有爬虫都启动失败")
-            return
-        
-        logger.info("开始执行爬虫...")
-        node.report_progress(5, "爬虫开始执行")
-        
+    for spider_name in platforms:
         try:
-            process.start()
-        except Exception as e:
-            logger.error(f"爬虫执行过程中发生异常: {e}")
-            node.fail(f"爬虫执行异常: {str(e)}")
-            return
-        
-        logger.info("所有爬虫执行完毕，开始汇总结果")
-        
-        if monitor.has_success():
-            summary = monitor.get_summary()
-            logger.info(f"执行成功: {summary}")
-            node.finish(summary)
-        else:
-            error_msg = monitor.get_error_message()
-            logger.error(f"执行失败: {error_msg}")
-            node.fail(error_msg)
+            crawler = process.create_crawler(spider_name)
 
+            crawler.signals.connect(monitor.on_spider_opened, signal=signals.spider_opened)
+            crawler.signals.connect(monitor.on_spider_closed, signal=signals.spider_closed)
+            crawler.signals.connect(monitor.on_item_scraped, signal=signals.item_scraped)
+            crawler.signals.connect(monitor.on_spider_error, signal=signals.spider_error)
 
-if __name__ == '__main__':
-    main()
+            per = resources_config.get(spider_name, {})
+            merged = {**spider_args}
+
+            if per.get('sections'):
+                secs = per['sections']
+                merged['sections'] = ','.join(secs) if isinstance(secs, list) else str(secs)
+
+            if per.get('proxy') is not None:
+                merged['proxy_url'] = per['proxy'] or ''
+
+            if per.get('headers'):
+                merged['platform_headers'] = json.dumps(per['headers'], ensure_ascii=False)
+
+            if per.get('cookies') is not None:
+                value = per['cookies']
+                merged['platform_cookies'] = (
+                    json.dumps(value) if isinstance(value, dict) else (value or '')
+                )
+
+            process.crawl(crawler, **merged)
+            logger.info(f"爬虫 {spider_name} 已加入执行队列")
+        except KeyError:
+            error_msg = f"爬虫不存在: {spider_name}"
+            monitor.record_startup_error(spider_name, error_msg)
+        except Exception as exc:
+            error_msg = f"启动失败: {str(exc)}"
+            monitor.record_startup_error(spider_name, error_msg)
+            logger.error(f"爬虫 {spider_name} 启动异常: {error_msg}")
+
+    if not process.crawlers:
+        raise ComponentFailure("所有爬虫都启动失败")
+
+    logger.info("开始执行爬虫...")
+    ctx.report_progress(5, "爬虫开始执行")
+    ctx.raise_if_cancelled()
+
+    def stop_if_cancelled() -> None:
+        try:
+            ctx.raise_if_cancelled()
+        except ComponentFailure:
+            logger.warning("收到取消或超时请求，正在停止爬虫")
+            process.stop()
+
+    cancel_check = LoopingCall(stop_if_cancelled)
+    cancel_check.start(1.0, now=False)
+
+    try:
+        process.start()
+    except ComponentFailure:
+        raise
+    except Exception as exc:
+        logger.error(f"爬虫执行过程中发生异常: {exc}")
+        raise ComponentFailure(f"爬虫执行异常: {str(exc)}") from exc
+    finally:
+        if cancel_check.running:
+            cancel_check.stop()
+
+    ctx.raise_if_cancelled()
+
+    logger.info("所有爬虫执行完毕，开始汇总结果")
+
+    if monitor.has_success():
+        summary = monitor.get_summary()
+        logger.info(f"执行成功: {summary}")
+        return summary
+
+    error_msg = monitor.get_error_message()
+    logger.error(f"执行失败: {error_msg}")
+    raise ComponentFailure(error_msg)
