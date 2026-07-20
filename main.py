@@ -227,7 +227,10 @@ def run(ctx: ComponentContext) -> Dict[str, Any]:
         }, priority='cmdline')
         logger.info(f"已启用文件输出: {output_file} (格式: {out_format})")
 
-    process = CrawlerProcess(settings)
+    # SDK Runner 已接管根日志处理器。禁止 Scrapy 再向 stderr 安装 handler，
+    # 否则普通 Scrapy 日志会被重复采集并按 stderr 错误地标记为 ERROR；
+    # urllib3 的日志上传诊断还可能进一步形成自采集反馈回路。
+    process = CrawlerProcess(settings, install_root_handler=False)
 
     for spider_name in platforms:
         try:
