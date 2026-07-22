@@ -109,9 +109,9 @@ class ThepaperSpider(BaseSpider):
     def parse_default_list(self, response: JsonResponse):
         section = response.meta.get("section", "")
         channel_id = self.section_map.get(section, "")
-        if not channel_id:
-            self.logger.error(f"未知采集板块: {section}")
-            return
+        # if not channel_id:
+        #     self.logger.error(f"未知采集板块: {section}")
+        #     return
         data = response.json()
         data_obj = data.get("data", {})
         
