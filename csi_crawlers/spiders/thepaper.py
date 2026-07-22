@@ -25,9 +25,9 @@ class ThepaperSpider(BaseSpider):
                 section = "要闻"
 
             channel_id = self.section_map.get(section)
-            if not channel_id:
-                self.logger.error(f"未知采集板块: {section}")
-                continue
+            # if not channel_id:
+            #     self.logger.error(f"未知采集板块: {section}")
+            #     continue
         
             yield JsonRequest(
                 url="https://api.thepaper.cn/contentapi/nodeCont/getByChannelId",

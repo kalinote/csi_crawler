@@ -1,0 +1,64 @@
+{
+    "meta": {
+        "node_instance_id": "crawler_daily_task",
+        "action_id": "daily_task"
+    },
+    "config": {
+        "page": 10,
+        "crawler_type": "default"
+    },
+    "inputs": {
+        "platforms": {
+            "type": "value",
+            "value": [
+                "anwangxia",
+                "bearblog",
+                "huanqiu_news",
+                "ifeng_news",
+                "javbus",
+                "nytimes_cn_news",
+                "sdm_bbs",
+                "thepaper",
+                "wforum"
+            ]
+        },
+        "resources_config": {
+            "type": "value",
+            "value": {
+                "anwangxia": {
+                    "sections": ["独家报道"]
+                },
+                "bearblog": {
+                    "sections": ["发现"]
+                },
+                "huanqiu_news": {
+                    "sections": ["国际", "国内", "军事"]
+                },
+                "ifeng_news": {
+                    "sections": ["资讯", "财经", "科技"]
+                },
+                "javbus": {
+                    "sections": ["老司机福利讨论区"]
+                },
+                "nytimes_cn_news": {
+                    "sections": ["首页", "国际", "亚太"]
+                },
+                "sdm_bbs": {
+                    "sections": ["PC新游发布与体验区", "PC独立游戏资源区", "PC游戏综合资源区"]
+                },
+                "thepaper": {
+                    "sections": ["要闻"]
+                },
+                "wforum": {
+                    "sections": ["即时新闻", "热点新闻", "中国军情"]
+                }
+            }
+        }
+    },
+    "outputs": {
+        "data_out": {
+            "type": "reference",
+            "value": ["cycle_task_out"]
+        }
+    }
+}
