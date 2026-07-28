@@ -37,7 +37,7 @@ class RabbitMQPipeline:
         instance = cls(
             rabbitmq_host=crawler.settings.get('RABBITMQ_HOST', 'localhost'),
             rabbitmq_port=crawler.settings.get('RABBITMQ_PORT', 5672),
-            rabbitmq_user=crawler.settings.get('RABBITMQ_USER', 'guest'),
+            rabbitmq_user=crawler.settings.get('RABBITMQ_USERNAME', 'guest'),
             rabbitmq_password=crawler.settings.get('RABBITMQ_PASSWORD', 'guest'),
             rabbitmq_vhost=crawler.settings.get('RABBITMQ_VHOST', '/'),
             rabbitmq_exchange=crawler.settings.get('RABBITMQ_EXCHANGE', ''),
