@@ -31,6 +31,8 @@ class SpiderMonitor:
         self.spider_errors = {}
         self.spider_success = {}
         self.item_counts = {}
+        self.item_error_counts = {}
+        self.item_error_samples = {}
         
     def on_spider_opened(self, spider):
         spider_name = spider.name
@@ -59,6 +61,18 @@ class SpiderMonitor:
             current = min(90, 10 + (self.item_counts[spider_name] // 10) * 5)
             self.spider_progress[spider_name] = current
             self._update_overall_progress(f"爬虫 {spider_name} 已采集 {self.item_counts[spider_name]} 条数据")
+
+    def on_item_error(self, item, response, spider, failure):
+        """记录 Item Pipeline 的不可恢复错误，避免组件错误地发送 EOS。"""
+        spider_name = spider.name
+        error_value = getattr(failure, 'value', failure)
+        error_msg = str(error_value)
+        self.item_error_counts[spider_name] = self.item_error_counts.get(spider_name, 0) + 1
+        samples = self.item_error_samples.setdefault(spider_name, [])
+        if len(samples) < 3:
+            samples.append(error_msg)
+        logger.error(f"爬虫 {spider_name} 的采集数据处理失败: {error_msg}")
+        self._update_overall_progress(f"爬虫 {spider_name} 存在采集数据处理失败")
     
     def on_spider_error(self, failure, spider):
         spider_name = spider.name
@@ -77,6 +91,19 @@ class SpiderMonitor:
         self.spider_errors[spider_name] = error
         self.spider_success[spider_name] = False
         logger.error(f"爬虫 {spider_name} 启动失败: {error}")
+
+    def raise_for_item_errors(self) -> None:
+        """存在 Item Pipeline 错误时终止组件，由 Runner 发送 ABORT。"""
+        if not self.item_error_counts:
+            return
+        details = []
+        for spider_name, count in sorted(self.item_error_counts.items()):
+            samples = "; ".join(self.item_error_samples.get(spider_name, []))
+            detail = f"{spider_name}: {count} 条"
+            if samples:
+                detail += f"，示例: {samples}"
+            details.append(detail)
+        raise ComponentFailure("采集数据未能安全写入输出队列。" + "；".join(details))
     
     def has_success(self) -> bool:
         return any(self.spider_success.values())
@@ -139,6 +166,35 @@ def extract_platforms(inputs: Dict[str, Any]) -> List[str]:
     return platforms
 
 
+def extract_reference_queues(outputs: Dict[str, Any]) -> List[str]:
+    """提取 Reference 输出队列，优先使用 streams 并兼容旧 value。"""
+    queues = []
+    for output in outputs.values():
+        if not isinstance(output, dict) or output.get('type') != 'reference':
+            continue
+
+        stream_queues = [
+            stream.get('queue_name').strip()
+            for stream in output.get('streams') or []
+            if isinstance(stream, dict)
+            and isinstance(stream.get('queue_name'), str)
+            and stream.get('queue_name').strip()
+        ]
+        if stream_queues:
+            queues.extend(stream_queues)
+            continue
+
+        value = output.get('value', [])
+        values = value if isinstance(value, list) else [value]
+        queues.extend(
+            str(queue).strip()
+            for queue in values
+            if queue is not None and str(queue).strip()
+        )
+
+    return list(dict.fromkeys(queues))
+
+
 def parse_spider_args(config: Dict[str, Any], inputs: Dict[str, Any], outputs: Dict[str, Any]) -> Dict[str, str]:
     args = {}
     
@@ -162,15 +218,7 @@ def parse_spider_args(config: Dict[str, Any], inputs: Dict[str, Any], outputs: D
             else:
                 args[key] = str(value)
         
-    queues = []
-    for output in outputs.values():
-        if isinstance(output, dict) and output.get('type') == 'reference':
-            value = output.get('value', [])
-            if isinstance(value, list):
-                queues.extend(value)
-            else:
-                queues.append(str(value))
-
+    queues = extract_reference_queues(outputs)
     if queues:
         args['rabbitmq_queue'] = ','.join(queues)
     
@@ -202,11 +250,20 @@ def run(ctx: ComponentContext) -> Dict[str, Any]:
     resources_config = extract_resources_config(inputs)
     ctx.logger.info("平台资源配置已加载", configured_platforms=sorted(resources_config))
 
+    reference_queues = extract_reference_queues(outputs)
     spider_args = parse_spider_args(config, inputs, outputs)
     ctx.logger.info("爬虫参数解析完成", argument_keys=sorted(spider_args))
 
     monitor = SpiderMonitor(len(platforms), ctx)
     settings = get_project_settings()
+    explicit_queue = spider_args.get('rabbitmq_queue')
+    has_explicit_queue = (
+        isinstance(explicit_queue, str)
+        and explicit_queue.strip().lower() not in {'', 'none', 'false'}
+    )
+    if not reference_queues and not has_explicit_queue:
+        settings.set('ITEM_PIPELINES', {}, priority='cmdline')
+        ctx.logger.info("没有连接 Reference 输出，已禁用 RabbitMQ 数据发布")
     output_file = ctx.get_config("output")
 
     if output_file:
@@ -239,6 +296,7 @@ def run(ctx: ComponentContext) -> Dict[str, Any]:
             crawler.signals.connect(monitor.on_spider_opened, signal=signals.spider_opened)
             crawler.signals.connect(monitor.on_spider_closed, signal=signals.spider_closed)
             crawler.signals.connect(monitor.on_item_scraped, signal=signals.item_scraped)
+            crawler.signals.connect(monitor.on_item_error, signal=signals.item_error)
             crawler.signals.connect(monitor.on_spider_error, signal=signals.spider_error)
 
             per = resources_config.get(spider_name, {})
@@ -299,6 +357,7 @@ def run(ctx: ComponentContext) -> Dict[str, Any]:
             cancel_check.stop()
 
     ctx.raise_if_cancelled()
+    monitor.raise_for_item_errors()
 
     logger.info("所有爬虫执行完毕，开始汇总结果")
 

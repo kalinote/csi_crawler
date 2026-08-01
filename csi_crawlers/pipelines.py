@@ -5,9 +5,11 @@
 
 
 # useful for handling different item types with a single interface
-from itemadapter import ItemAdapter
 import json
+from uuid import uuid4
+
 import pika
+from itemadapter import ItemAdapter
 from scrapy.utils.serialize import ScrapyJSONEncoder
 
 
@@ -67,6 +69,7 @@ class RabbitMQPipeline:
         )
         self.connection = pika.BlockingConnection(parameters)
         self.channel = self.connection.channel()
+        self.channel.confirm_delivery()
         
         for queue in self.rabbitmq_queues:
             if self.rabbitmq_exchange:
@@ -106,7 +109,9 @@ class RabbitMQPipeline:
         custom_queue = getattr(spider, 'rabbitmq_queue', None)
         if custom_queue:
             if ',' in custom_queue:
-                self.rabbitmq_queues = [q.strip() for q in custom_queue.split(',') if q.strip()]
+                self.rabbitmq_queues = list(dict.fromkeys(
+                    q.strip() for q in custom_queue.split(',') if q.strip()
+                ))
                 spider.logger.info(f'Pipeline 使用自定义 RabbitMQ 队列(多个): {self.rabbitmq_queues}')
             else:
                 self.rabbitmq_queues = [custom_queue]
@@ -125,40 +130,50 @@ class RabbitMQPipeline:
         item_dict = dict(adapter)
         
         message = json.dumps(item_dict, ensure_ascii=False, cls=self.encoder.__class__)
+        # 同一逻辑记录在多队列 fan-out 和重试中必须复用同一 ID。
+        message_id = uuid4().hex
+        properties = pika.BasicProperties(
+            delivery_mode=2,
+            message_id=message_id,
+            content_type='application/json',
+            content_encoding='utf-8',
+        )
         
+        # 已确认的队列不重复发送，重连后仅继续处理尚未确认的队列。
+        pending_queues = list(dict.fromkeys(self.rabbitmq_queues))
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                self._ensure_connection()
+                if attempt == 0:
+                    self._ensure_connection()
+                else:
+                    self._connect_rabbitmq()
                 
-                for queue in self.rabbitmq_queues:
-                    if self.rabbitmq_exchange:
-                        self.channel.basic_publish(
-                            exchange=self.rabbitmq_exchange,
-                            routing_key=queue,
-                            body=message,
-                            properties=pika.BasicProperties(
-                                delivery_mode=2,
-                            )
-                        )
-                    else:
-                        self.channel.basic_publish(
-                            exchange='',
-                            routing_key=queue,
-                            body=message,
-                            properties=pika.BasicProperties(
-                                delivery_mode=2,
-                            )
-                        )
+                for queue in list(pending_queues):
+                    published = self.channel.basic_publish(
+                        exchange=self.rabbitmq_exchange or '',
+                        routing_key=queue,
+                        body=message,
+                        properties=properties,
+                        mandatory=True,
+                    )
+                    if published is False:
+                        raise pika.exceptions.NackError([])
+                    pending_queues.remove(queue)
                 break
             except (pika.exceptions.ChannelWrongStateError, 
                     pika.exceptions.ChannelClosedByBroker,
                     pika.exceptions.ConnectionClosedByBroker,
-                    pika.exceptions.AMQPConnectionError) as e:
-                self.spider.logger.warning(f'发送消息到 RabbitMQ 失败 (尝试 {attempt + 1}/{max_retries}): {e}')
-                if attempt < max_retries - 1:
-                    self._connect_rabbitmq()
-                else:
+                    pika.exceptions.ConnectionWrongStateError,
+                    pika.exceptions.StreamLostError,
+                    pika.exceptions.AMQPConnectionError,
+                    pika.exceptions.NackError,
+                    pika.exceptions.UnroutableError) as e:
+                self.spider.logger.warning(
+                    f'发送消息到 RabbitMQ 失败，message_id={message_id} '
+                    f'(尝试 {attempt + 1}/{max_retries}): {e}'
+                )
+                if attempt == max_retries - 1:
                     self.spider.logger.error(f'发送消息到 RabbitMQ 失败，已重试{max_retries}次')
                     raise
             except Exception as e:
