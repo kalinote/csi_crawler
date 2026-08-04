@@ -27,7 +27,7 @@ class RabbitMQPipeline:
     @classmethod
     def from_crawler(cls, crawler):
         instance = cls(
-            rabbitmq_client=crawler.settings.get('CSI_RABBITMQ_CLIENT'),
+            rabbitmq_client=getattr(crawler, 'csi_rabbitmq_client', None),
             rabbitmq_queue=crawler.settings.get('RABBITMQ_QUEUE', 'scrapy_items')
         )
         instance.crawler = crawler

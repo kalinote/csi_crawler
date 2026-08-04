@@ -261,13 +261,14 @@ def run(ctx: ComponentContext) -> Dict[str, Any]:
         isinstance(explicit_queue, str)
         and explicit_queue.strip().lower() not in {'', 'none', 'false'}
     )
+    rabbitmq_client = None
     if not reference_queues and not has_explicit_queue:
         settings.set('ITEM_PIPELINES', {}, priority='cmdline')
         ctx.logger.info("没有连接 Reference 输出，已禁用 RabbitMQ 数据发布")
     else:
-        if ctx.rabbitmq is None:
+        rabbitmq_client = ctx.rabbitmq
+        if rabbitmq_client is None:
             raise ComponentFailure("SDK RabbitMQ 客户端未初始化，无法发布采集结果")
-        settings.set('CSI_RABBITMQ_CLIENT', ctx.rabbitmq, priority='cmdline')
     output_file = ctx.get_config("output")
 
     if output_file:
@@ -296,6 +297,8 @@ def run(ctx: ComponentContext) -> Dict[str, Any]:
     for spider_name in platforms:
         try:
             crawler = process.create_crawler(spider_name)
+            # 运行态连接不能放入 Settings，Scrapy 初始化时会对配置执行深拷贝。
+            crawler.csi_rabbitmq_client = rabbitmq_client
 
             crawler.signals.connect(monitor.on_spider_opened, signal=signals.spider_opened)
             crawler.signals.connect(monitor.on_spider_closed, signal=signals.spider_closed)
