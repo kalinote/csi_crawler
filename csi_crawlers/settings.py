@@ -70,15 +70,7 @@ ITEM_PIPELINES = {
     "csi_crawlers.pipelines.RabbitMQPipeline": 300,
 }
 
-# RabbitMQ 配置
-RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
-RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', '5672'))
-RABBITMQ_USERNAME = os.getenv('RABBITMQ_USERNAME', 'guest')
-RABBITMQ_PASSWORD = os.getenv('RABBITMQ_PASSWORD', 'guest')
-RABBITMQ_VHOST = os.getenv('RABBITMQ_VHOST', '/')
-RABBITMQ_EXCHANGE = os.getenv('RABBITMQ_EXCHANGE', '')
-RABBITMQ_ROUTING_KEY = os.getenv('RABBITMQ_ROUTING_KEY', 'tmp_data')
-RABBITMQ_QUEUE = os.getenv('RABBITMQ_QUEUE', 'tmp_data')
+RABBITMQ_QUEUE = 'tmp_data'
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html

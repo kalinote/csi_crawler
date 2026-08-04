@@ -8,7 +8,6 @@
 import json
 from uuid import uuid4
 
-import pika
 from itemadapter import ItemAdapter
 from scrapy.utils.serialize import ScrapyJSONEncoder
 
@@ -19,89 +18,20 @@ class CsiCrawlersPipeline:
 
 
 class RabbitMQPipeline:
-    def __init__(self, rabbitmq_host, rabbitmq_port, rabbitmq_user, rabbitmq_password, 
-                 rabbitmq_vhost, rabbitmq_exchange, rabbitmq_routing_key, rabbitmq_queue):
-        self.rabbitmq_host = rabbitmq_host
-        self.rabbitmq_port = rabbitmq_port
-        self.rabbitmq_user = rabbitmq_user
-        self.rabbitmq_password = rabbitmq_password
-        self.rabbitmq_vhost = rabbitmq_vhost
-        self.rabbitmq_exchange = rabbitmq_exchange
-        self.rabbitmq_routing_key = rabbitmq_routing_key
+    def __init__(self, rabbitmq_client, rabbitmq_queue):
+        self.rabbitmq = rabbitmq_client
         self.rabbitmq_queue = rabbitmq_queue
-        self.connection = None
-        self.channel = None
         self.encoder = ScrapyJSONEncoder()
         self.spider = None
 
     @classmethod
     def from_crawler(cls, crawler):
         instance = cls(
-            rabbitmq_host=crawler.settings.get('RABBITMQ_HOST', 'localhost'),
-            rabbitmq_port=crawler.settings.get('RABBITMQ_PORT', 5672),
-            rabbitmq_user=crawler.settings.get('RABBITMQ_USERNAME', 'guest'),
-            rabbitmq_password=crawler.settings.get('RABBITMQ_PASSWORD', 'guest'),
-            rabbitmq_vhost=crawler.settings.get('RABBITMQ_VHOST', '/'),
-            rabbitmq_exchange=crawler.settings.get('RABBITMQ_EXCHANGE', ''),
-            rabbitmq_routing_key=crawler.settings.get('RABBITMQ_ROUTING_KEY', 'scrapy_items'),
+            rabbitmq_client=crawler.settings.get('CSI_RABBITMQ_CLIENT'),
             rabbitmq_queue=crawler.settings.get('RABBITMQ_QUEUE', 'scrapy_items')
         )
         instance.crawler = crawler
         return instance
-
-    def _connect_rabbitmq(self):
-        """创建或重新创建RabbitMQ连接"""
-        try:
-            if self.connection and not self.connection.is_closed:
-                self.connection.close()
-        except Exception as e:
-            if self.spider:
-                self.spider.logger.warning(f'关闭旧连接时出错: {e}')
-        
-        credentials = pika.PlainCredentials(self.rabbitmq_user, self.rabbitmq_password)
-        parameters = pika.ConnectionParameters(
-            host=self.rabbitmq_host,
-            port=self.rabbitmq_port,
-            virtual_host=self.rabbitmq_vhost,
-            credentials=credentials,
-            heartbeat=600,
-            blocked_connection_timeout=300,
-        )
-        self.connection = pika.BlockingConnection(parameters)
-        self.channel = self.connection.channel()
-        self.channel.confirm_delivery()
-        
-        for queue in self.rabbitmq_queues:
-            if self.rabbitmq_exchange:
-                self.channel.exchange_declare(
-                    exchange=self.rabbitmq_exchange,
-                    exchange_type='direct',
-                    durable=True
-                )
-                self.channel.queue_declare(queue=queue, durable=True)
-                self.channel.queue_bind(
-                    exchange=self.rabbitmq_exchange,
-                    queue=queue,
-                    routing_key=queue
-                )
-            else:
-                self.channel.queue_declare(queue=queue, durable=True)
-        
-        if self.spider:
-            self.spider.logger.info('RabbitMQ 连接已建立')
-    
-    def _ensure_connection(self):
-        """确保连接和channel处于正常状态"""
-        if not self.connection or self.connection.is_closed:
-            if self.spider:
-                self.spider.logger.warning('检测到连接已关闭，正在重新连接...')
-            self._connect_rabbitmq()
-            return
-        
-        if not self.channel or self.channel.is_closed:
-            if self.spider:
-                self.spider.logger.warning('检测到channel已关闭，正在重新创建...')
-            self._connect_rabbitmq()
 
     def open_spider(self):
         spider = self.crawler.spider
@@ -118,66 +48,30 @@ class RabbitMQPipeline:
                 spider.logger.info(f'Pipeline 使用自定义 RabbitMQ 队列: {custom_queue}')
         else:
             self.rabbitmq_queues = [self.rabbitmq_queue]
-        
-        self._connect_rabbitmq()
+        if self.rabbitmq is None:
+            raise RuntimeError('Scrapy Pipeline 未获得 SDK RabbitMQ 客户端')
 
     def close_spider(self):
-        if self.connection and not self.connection.is_closed:
-            self.connection.close()
+        # RabbitMQ 生命周期由 SDK Runner 统一管理。
+        return None
 
     def process_item(self, item):
         adapter = ItemAdapter(item)
         item_dict = dict(adapter)
         
-        message = json.dumps(item_dict, ensure_ascii=False, cls=self.encoder.__class__)
+        message = json.loads(self.encoder.encode(item_dict))
         # 同一逻辑记录在多队列 fan-out 和重试中必须复用同一 ID。
         message_id = uuid4().hex
-        properties = pika.BasicProperties(
-            delivery_mode=2,
+        queue_names = list(dict.fromkeys(self.rabbitmq_queues))
+        success_count = self.rabbitmq.send_messages_batch(
+            queue_names,
+            message,
             message_id=message_id,
-            content_type='application/json',
-            content_encoding='utf-8',
         )
-        
-        # 已确认的队列不重复发送，重连后仅继续处理尚未确认的队列。
-        pending_queues = list(dict.fromkeys(self.rabbitmq_queues))
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                if attempt == 0:
-                    self._ensure_connection()
-                else:
-                    self._connect_rabbitmq()
-                
-                for queue in list(pending_queues):
-                    published = self.channel.basic_publish(
-                        exchange=self.rabbitmq_exchange or '',
-                        routing_key=queue,
-                        body=message,
-                        properties=properties,
-                        mandatory=True,
-                    )
-                    if published is False:
-                        raise pika.exceptions.NackError([])
-                    pending_queues.remove(queue)
-                break
-            except (pika.exceptions.ChannelWrongStateError, 
-                    pika.exceptions.ChannelClosedByBroker,
-                    pika.exceptions.ConnectionClosedByBroker,
-                    pika.exceptions.ConnectionWrongStateError,
-                    pika.exceptions.StreamLostError,
-                    pika.exceptions.AMQPConnectionError,
-                    pika.exceptions.NackError,
-                    pika.exceptions.UnroutableError) as e:
-                self.spider.logger.warning(
-                    f'发送消息到 RabbitMQ 失败，message_id={message_id} '
-                    f'(尝试 {attempt + 1}/{max_retries}): {e}'
-                )
-                if attempt == max_retries - 1:
-                    self.spider.logger.error(f'发送消息到 RabbitMQ 失败，已重试{max_retries}次')
-                    raise
-            except Exception as e:
-                self.spider.logger.error(f'发送消息到 RabbitMQ 时发生未知错误: {e}')
-                raise
+        if success_count != len(queue_names):
+            raise RuntimeError(
+                'SDK 未能将采集结果发布到全部 Reference 输出队列，'
+                f'message_id={message_id}'
+            )
         
         return item

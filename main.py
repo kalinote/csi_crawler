@@ -264,6 +264,10 @@ def run(ctx: ComponentContext) -> Dict[str, Any]:
     if not reference_queues and not has_explicit_queue:
         settings.set('ITEM_PIPELINES', {}, priority='cmdline')
         ctx.logger.info("没有连接 Reference 输出，已禁用 RabbitMQ 数据发布")
+    else:
+        if ctx.rabbitmq is None:
+            raise ComponentFailure("SDK RabbitMQ 客户端未初始化，无法发布采集结果")
+        settings.set('CSI_RABBITMQ_CLIENT', ctx.rabbitmq, priority='cmdline')
     output_file = ctx.get_config("output")
 
     if output_file:
