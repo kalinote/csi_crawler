@@ -18,9 +18,10 @@ class CsiCrawlersPipeline:
 
 
 class RabbitMQPipeline:
-    def __init__(self, rabbitmq_client, rabbitmq_queue):
+    def __init__(self, rabbitmq_client, rabbitmq_queue, component_context=None):
         self.rabbitmq = rabbitmq_client
         self.rabbitmq_queue = rabbitmq_queue
+        self.component_context = component_context
         self.encoder = ScrapyJSONEncoder()
         self.spider = None
 
@@ -28,7 +29,8 @@ class RabbitMQPipeline:
     def from_crawler(cls, crawler):
         instance = cls(
             rabbitmq_client=getattr(crawler, 'csi_rabbitmq_client', None),
-            rabbitmq_queue=crawler.settings.get('RABBITMQ_QUEUE', 'scrapy_items')
+            rabbitmq_queue=crawler.settings.get('RABBITMQ_QUEUE', 'scrapy_items'),
+            component_context=getattr(crawler, 'csi_component_context', None),
         )
         instance.crawler = crawler
         return instance
@@ -63,6 +65,8 @@ class RabbitMQPipeline:
         # 同一逻辑记录在多队列 fan-out 和重试中必须复用同一 ID。
         message_id = uuid4().hex
         queue_names = list(dict.fromkeys(self.rabbitmq_queues))
+        if not queue_names:
+            raise RuntimeError('采集结果没有可用的 Reference 输出队列')
         success_count = self.rabbitmq.send_messages_batch(
             queue_names,
             message,
@@ -73,5 +77,7 @@ class RabbitMQPipeline:
                 'SDK 未能将采集结果发布到全部 Reference 输出队列，'
                 f'message_id={message_id}'
             )
+        if self.component_context is not None:
+            self.component_context.mark_successful_result()
         
         return item

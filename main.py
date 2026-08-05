@@ -299,6 +299,7 @@ def run(ctx: ComponentContext) -> Dict[str, Any]:
             crawler = process.create_crawler(spider_name)
             # 运行态连接不能放入 Settings，Scrapy 初始化时会对配置执行深拷贝。
             crawler.csi_rabbitmq_client = rabbitmq_client
+            crawler.csi_component_context = ctx
 
             crawler.signals.connect(monitor.on_spider_opened, signal=signals.spider_opened)
             crawler.signals.connect(monitor.on_spider_closed, signal=signals.spider_closed)
