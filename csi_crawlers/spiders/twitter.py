@@ -543,7 +543,7 @@ class TwitterSpider(BaseSpider):
         item["entity_type"] = "post"
         screen_name = user.get("screen_name") or "i/web"
         item["url"] = f"https://x.com/{screen_name}/status/{source_id}"
-        item["platform"] = "twitter"
+        item["platform"] = "Twitter"
         item["section"] = section
         item["spider_name"] = self.name
         item["crawled_at"] = datetime.now(timezone.utc).isoformat()
