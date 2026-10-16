@@ -24,6 +24,15 @@ class TwitterSpider(BaseSpider):
         "COOKIES_ENABLED": True,
         "COOKIES_DEBUG": False,
     }
+    default_headers = {
+        "accept": "application/json",
+        "accept-language": "en-US,en;q=0.9",
+        "user-agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/143.0.0.0 Safari/537.36"
+        ),
+    }
 
     # 来自 X 网页客户端的公共标识，与账号 Cookie、开发者 API 凭证无关。
     web_bearer = (
@@ -101,6 +110,16 @@ class TwitterSpider(BaseSpider):
         if self.start_time is not None and self.end_time is not None:
             if self.start_time > self.end_time:
                 raise ValueError("采集开始时间不能晚于结束时间")
+        if not isinstance(self.platform_headers, dict) or any(
+            not isinstance(k, str) or not isinstance(v, str)
+            for k, v in self.platform_headers.items()
+        ):
+            raise ValueError("twitter headers 必须为字符串键值对象")
+        # 请求头名称不区分大小写，用户提供的字段优先于默认值。
+        self.platform_headers = {
+            **self.default_headers,
+            **{k.lower(): v for k, v in self.platform_headers.items()},
+        }
 
         if self.crawler_type == "keyword":
             if not self.keywords or any(not isinstance(k, str) or not k.strip() for k in self.keywords):
@@ -124,12 +143,7 @@ class TwitterSpider(BaseSpider):
             ):
                 raise ValueError("search_features 必须为布尔值组成的对象")
             self.search_features = {**self.search_features, **(search_features or {})}
-            if not isinstance(self.platform_headers, dict) or any(
-                not isinstance(k, str) or not isinstance(v, str)
-                for k, v in self.platform_headers.items()
-            ):
-                raise ValueError("twitter headers 必须为字符串键值对象")
-            self.search_headers = {k.lower(): v for k, v in self.platform_headers.items()}
+            self.search_headers = dict(self.platform_headers)
             cookie_header = self.search_headers.pop("cookie", "")
             cookies = self.platform_cookies
             if isinstance(cookies, str):
@@ -161,7 +175,8 @@ class TwitterSpider(BaseSpider):
             if not all(self.search_cookies.get(k, "").strip() for k in ("auth_token", "ct0")):
                 raise ValueError("关键词采集需要在 twitter cookies 中提供 auth_token 和 ct0")
             self.search_headers = {
-                "accept": "application/json",
+                "content-type": "application/json",
+                "origin": "https://x.com",
                 "authorization": self.web_bearer,
                 "x-twitter-active-user": "yes",
                 "x-twitter-auth-type": "OAuth2Session",
@@ -216,7 +231,13 @@ class TwitterSpider(BaseSpider):
                 f"https://cdn.syndication.twimg.com/tweet-result?{query}",
                 callback=self.parse_detail,
                 errback=self.on_request_error,
-                headers={"Accept": "application/json"},
+                headers={
+                    "referer": "https://x.com/",
+                    **{
+                        k: v for k, v in self.platform_headers.items()
+                        if k != "cookie"
+                    },
+                },
                 meta={
                     "source_id": source_id,
                     "handle_httpstatus_all": True,
@@ -264,10 +285,9 @@ class TwitterSpider(BaseSpider):
             callback=self.parse_search_list,
             errback=self.on_request_error,
             headers={
-                **self.search_headers,
-                "content-type": "application/json",
-                "x-csrf-token": self.search_csrf_tokens[keyword],
                 "referer": "https://x.com/search?" + urlencode({"q": keyword, "f": "live" if self.search_product == "Latest" else "top"}),
+                **self.search_headers,
+                "x-csrf-token": self.search_csrf_tokens[keyword],
             },
             cookies=self.search_cookies if cursor is None else {},
             meta={
