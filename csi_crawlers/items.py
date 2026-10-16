@@ -70,3 +70,16 @@ class CSIArticlesItem(CSICommonFields):
     safe_raw_content = scrapy.Field()
     cover_image = scrapy.Field()
     likes = scrapy.Field()
+
+class CSIPostItem(CSICommonFields):
+    """社交动态贴文条目。"""
+    title = scrapy.Field()
+    clean_content = scrapy.Field()
+    raw_content = scrapy.Field()
+    mentions = scrapy.Field()
+    files_urls = scrapy.Field()
+    metrics = scrapy.Field()
+    post_type = scrapy.Field()
+    parent_id = scrapy.Field()
+    geo_location = scrapy.Field()
+    ip_location = scrapy.Field()
