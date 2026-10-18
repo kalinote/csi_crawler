@@ -572,6 +572,35 @@ class TwitterSpider(BaseSpider):
         ):
             count = safe_int(data.get(source_field))
             item["metrics"][field] = count if count is not None else -1
+
+        # 媒体清单交给媒体处理器归档，正文与原始数据仍按原值保存。
+        media_entries = (
+            (data.get("extended_entities") or {}).get("media")
+            or entities.get("media") or data.get("mediaDetails") or []
+        )
+        if not media_entries and isinstance(data.get("photos"), list):
+            media_entries = [{**photo, "type": "photo", "media_url_https": photo.get("url")} for photo in data["photos"] if isinstance(photo, dict)]
+        item["media_resources"] = []
+        for media in media_entries:
+            if not isinstance(media, dict):
+                continue
+            media_type = media.get("type")
+            media_id = media.get("id_str") or media.get("media_key")
+            image_url = media.get("media_url_https") or media.get("media_url")
+            metadata = {"media_id": str(media_id)} if media_id else {}
+            dimensions = media.get("original_info") or {}
+            metadata.update({key: dimensions[key] for key in ("width", "height") if key in dimensions})
+            if media_type in {"video", "animated_gif"}:
+                variants = (media.get("video_info") or data.get("video") or {}).get("variants") or []
+                videos = [variant for variant in variants if isinstance(variant, dict) and (variant.get("content_type") or variant.get("type")) == "video/mp4" and (variant.get("url") or variant.get("src"))]
+                if videos:
+                    video = max(videos, key=lambda variant: safe_int(variant.get("bitrate")) or 0)
+                    video_url = video.get("url") or video.get("src")
+                    if isinstance(video_url, str) and urlsplit(video_url).scheme in {"http", "https"} and urlsplit(video_url).hostname:
+                        item["media_resources"].append({**metadata, "source_url": video_url, "type": "video", "role": "content"})
+            if isinstance(image_url, str) and urlsplit(image_url).scheme in {"http", "https"} and urlsplit(image_url).hostname:
+                item["media_resources"].append({**metadata, "source_url": image_url, "type": "image", "role": "poster" if media_type in {"video", "animated_gif"} else "content"})
+        item["files_urls"] = list(dict.fromkeys(media["source_url"] for media in item["media_resources"]))
         return item
 
     def on_request_error(self, failure):

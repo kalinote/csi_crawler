@@ -78,6 +78,7 @@ class CSIPostItem(CSICommonFields):
     raw_content = scrapy.Field()
     mentions = scrapy.Field()
     files_urls = scrapy.Field()
+    media_resources = scrapy.Field()
     metrics = scrapy.Field()
     post_type = scrapy.Field()
     parent_id = scrapy.Field()
